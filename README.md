@@ -1,6 +1,6 @@
 ## Cloze Test Helps: Effective Video Anomaly Detection via Learning to Complete Video Events
 
-by anonymous author(s) for ACMMM2020. 
+by anonymous author(s) for ACM Multimedia 2020. 
 
 ## 1. Environment
 

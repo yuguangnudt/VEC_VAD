@@ -133,18 +133,15 @@ if not foreground_saved:
 
     if modality == 'raw2flow':
         dataset = unified_dataset_interface(dataset_name=dataset_name, dir=os.path.join('raw_datasets', dataset_name),
-                                             context_frame_num=context_frame_num, mode=mode,
-                                             border_mode=border_mode, all_bboxes=all_bboxes, patch_size=patch_size,
-                                             rw=rw, rh=rh, file_format=file_format1)
+                                            context_frame_num=context_frame_num, mode=mode, border_mode=border_mode, 
+                                            all_bboxes=all_bboxes, patch_size=patch_size, file_format=file_format1)
         dataset2 = unified_dataset_interface(dataset_name=dataset_name, dir=os.path.join('optical_flow', dataset_name),
-                                            context_frame_num=context_of_num, mode=mode,
-                                            border_mode=border_mode, all_bboxes=all_bboxes, patch_size=patch_size,
-                                             rw=rw, rh=rh, file_format=file_format2)
+                                             context_frame_num=context_of_num, mode=mode, border_mode=border_mode, 
+                                             all_bboxes=all_bboxes, patch_size=patch_size, file_format=file_format2)
     else:
         dataset = unified_dataset_interface(dataset_name=dataset_name, dir=os.path.join(modality, dataset_name),
-                                            context_frame_num=context_frame_num, mode=mode,
-                                            border_mode=border_mode, all_bboxes=all_bboxes, patch_size=patch_size,
-                                            rw=rw, rh=rh, file_format=file_format)
+                                            context_frame_num=context_frame_num, mode=mode, border_mode=border_mode, 
+                                            all_bboxes=all_bboxes, patch_size=patch_size, file_format=file_format)
     
     if dataset_name == 'ShanghaiTech':
         foreground_set = [[[[] for ww in range(w_block)] for hh in range(h_block)] for ss in range(dataset.scene_num)]
