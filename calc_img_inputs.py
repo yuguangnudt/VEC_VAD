@@ -9,7 +9,7 @@ from torch.utils.data import Dataset, DataLoader
 from vad_datasets import ped_dataset, avenue_dataset, shanghaiTech_dataset
 from FlowNet2_src import FlowNet2, flow_to_image
 from torch.autograd import Variable
-from helper.visualization_helper import visualize_img
+from FlowNet2_src.flowlib import flow_to_image
 
 def calc_optical_flow(dataset):
     of_root_dir = './optical_flow'
@@ -28,6 +28,7 @@ def calc_optical_flow(dataset):
         print('Calculating optical flow for {}-th frame'.format(idx+1))
         cur_img_addr = dataset.all_frame_addr[idx]
         cur_img_name = cur_img_addr.split('/')[-1]
+        cur_img_name = cur_img_name.split('.')[0]
 
         # parent path to store optical flow
         of_path = of_root_dir
@@ -75,6 +76,9 @@ def calc_optical_flow(dataset):
             ims_v = Variable(ims.cuda(), requires_grad=False)
             pred_flow = flownet2(ims_v).cpu().data
             pred_flow = pred_flow[0].numpy().transpose((1, 2, 0))
+            # visualization
+            # cv2.imshow('of', flow_to_image(pred_flow))
+            # cv2.waitKey(0)
             new_inputs = cv2.resize(pred_flow, old_size)
 
         # save new raw inputs
@@ -82,11 +86,17 @@ def calc_optical_flow(dataset):
 
 
 if __name__ == '__main__':
+    # mode = train or test. 'train' and 'test' are used for calculating optical flow of training dataset and testing dataset respectively.
+    dataset = ped_dataset(dir='./raw_datasets/UCSDped2', context_frame_num=1, mode='train', border_mode='hard')
+    calc_optical_flow(dataset)
     dataset = ped_dataset(dir='./raw_datasets/UCSDped2', context_frame_num=1, mode='test', border_mode='hard')
     calc_optical_flow(dataset)
-    dataset = avenue_dataset(dir='./raw_datasets/avenue', context_frame_num=1, mode='test', border_mode='hard')
-    calc_optical_flow(dataset)
-    dataset = shanghaiTech_dataset(dir='./raw_datasets/ShanghaiTech', context_frame_num=1, mode='test', border_mode='hard')
-    calc_optical_flow(dataset)
+    
+    # The optical flow calculation of avenue and ShanghaiTech sets is basically the same as above
+    
+    # dataset = avenue_dataset(dir='./raw_datasets/avenue', context_frame_num=1, mode='train', border_mode='hard')
+    # calc_optical_flow(dataset)
+    # dataset = shanghaiTech_dataset(dir='./raw_datasets/ShanghaiTech', context_frame_num=1, mode='train', border_mode='hard')
+    # calc_optical_flow(dataset)
 
     
