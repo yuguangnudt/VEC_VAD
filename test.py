@@ -8,12 +8,12 @@ from vad_datasets import bbox_collate, img_tensor2numpy, img_batch_tensor2numpy,
 from fore_det.obj_det_with_motion import imshow_bboxes, getObBboxes, getFgBboxes, delCoverBboxes
 from fore_det.simple_patch import get_patch_loc
 import cv2
-import torch
 from model.unet import SelfCompleteNet4, SelfCompleteNetFull, SelfCompleteNet1raw1of
 import torch.optim as optim
 import torch.nn as nn
 from utils import save_roc_pr_curve_data
 from configparser import ConfigParser
+from helper.visualization_helper import visualize_pair, visualize_batch, visualize_pair_map
 
 def calc_block_idx(x_min, x_max, y_min, y_max, h_step, w_step, mode):
     all_blocks = list()
@@ -337,11 +337,11 @@ if scores_saved is False:
                                     # # visualization 
                                     # max_num = 30
                                     # visualize_pair(
-                                        # batch_1=img_batch_tensor2numpy(raw_targets.cpu().detach()[:max_num, 0:3, :, :]),
-                                        # batch_2=img_batch_tensor2numpy(raw_outputs.cpu().detach()[:max_num, 0:3, :, :]))
+                                        # batch_1=img_batch_tensor2numpy(raw_targets.cpu().detach()[:max_num, 6:9, :, :]),
+                                        # batch_2=img_batch_tensor2numpy(raw_outputs.cpu().detach()[:max_num, 6:9, :, :]))
                                     # visualize_pair(
-                                        # batch_1=img_batch_tensor2numpy(of_targets.cpu().detach()[:max_num, 0:2, :, :]),
-                                        # batch_2=img_batch_tensor2numpy(of_outputs.cpu().detach()[:max_num, 0:2, :, :]))    
+                                        # batch_1=img_batch_tensor2numpy(of_targets.cpu().detach()[:max_num, 4:6, :, :]),
+                                        # batch_2=img_batch_tensor2numpy(of_outputs.cpu().detach()[:max_num, 4:6, :, :]))    
                                         
                                     #mse
                                     if useFlow:
@@ -411,7 +411,7 @@ if criterion == 'frame':
         all_targets = all_targets > 0
         results_path = os.path.join(results_dir, dataset_name, '{}_{}_{}_frame_results.npz'.format(modality, foreground_extraction_mode, method))
         print('Results written to {}:'.format(results_path))
-        auc, eer1, eer2 = save_roc_pr_curve_data(all_frame_scores, all_targets, results_path)
+        auc = save_roc_pr_curve_data(all_frame_scores, all_targets, results_path)
 elif criterion == 'pixel':
     if dataset_name != 'ShanghaiTech':
         all_pixel_scores = list()
