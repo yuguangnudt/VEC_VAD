@@ -37,6 +37,6 @@ def save_roc_pr_curve_data(scores, labels, file_path, verbose=True):
                         precision_anom=precision_anom, recall_anom=recall_anom,
                         pr_thresholds_anom=pr_thresholds_anom, pr_auc_anom=pr_auc_anom)
 
-    return roc_auc, eer1, eer2
+    return roc_auc
 
 
