@@ -1,15 +1,13 @@
 import torch
 import numpy as np
 import cv2
-from collections import OrderedDict
 import os
-import glob
-import scipy.io as sio
-from torch.utils.data import Dataset, DataLoader
-from vad_datasets import ped_dataset, avenue_dataset, shanghaiTech_dataset
-from FlowNet2_src import FlowNet2, flow_to_image
+from torch.utils.data import DataLoader
+from vad_datasets import unified_dataset_interface
+from FlowNet2_src import FlowNet2
 from torch.autograd import Variable
 from FlowNet2_src.flowlib import flow_to_image
+
 
 def calc_optical_flow(dataset):
     of_root_dir = './optical_flow'
@@ -38,7 +36,7 @@ def calc_optical_flow(dataset):
         if os.path.exists(of_path) is False:
             os.makedirs(of_path, exist_ok=True)
 
-        # calculate new img inputs: optical flow by flownet2
+        # Calculate optical flow by FlowNet2
         cur_imgs = np.transpose(batch[0].numpy(), [0, 2, 3, 1])
         frameRange = dataset.context_range(idx)
         old_size = (cur_imgs.shape[2], cur_imgs.shape[1])
@@ -76,27 +74,40 @@ def calc_optical_flow(dataset):
             ims_v = Variable(ims.cuda(), requires_grad=False)
             pred_flow = flownet2(ims_v).cpu().data
             pred_flow = pred_flow[0].numpy().transpose((1, 2, 0))
-            # visualization
+
+            # Visualization
             # cv2.imshow('of', flow_to_image(pred_flow))
             # cv2.waitKey(0)
+
             new_inputs = cv2.resize(pred_flow, old_size)
 
-        # save new raw inputs
+        # Save optical flow
         np.save(os.path.join(of_path, cur_img_name+'.npy'), new_inputs)
 
 
 if __name__ == '__main__':
-    # mode = train or test. 'train' and 'test' are used for calculating optical flow of training dataset and testing dataset respectively.
-    dataset = ped_dataset(dir='./raw_datasets/UCSDped2', context_frame_num=1, mode='train', border_mode='hard')
-    calc_optical_flow(dataset)
-    dataset = ped_dataset(dir='./raw_datasets/UCSDped2', context_frame_num=1, mode='test', border_mode='hard')
-    calc_optical_flow(dataset)
-    
-    # The optical flow calculation of avenue and ShanghaiTech sets is basically the same as above
-    
-    # dataset = avenue_dataset(dir='./raw_datasets/avenue', context_frame_num=1, mode='train', border_mode='hard')
-    # calc_optical_flow(dataset)
-    # dataset = shanghaiTech_dataset(dir='./raw_datasets/ShanghaiTech', context_frame_num=1, mode='train', border_mode='hard')
-    # calc_optical_flow(dataset)
+    '''
+        Calculate optical flow of different datasets. This will generate a new folder named optical_flow containing 
+        the optical flow of the different datasets. The optical_flow folder has the same directory structure as the 
+        raw_datasets folder.
+        '''
 
-    
+    '''
+    unified_dataset_interface
+    Args:
+        dataset_name: UCSDped2, avenue, ShanghaiTech
+        mode: train, test (for calculating optical flow of training dataset and testing dataset respectively)
+        other parameters: fixed
+    Return:
+        dataset
+    '''
+
+    # Example of calculating optical flow of UCSDped2 training and testing sets.
+    dataset_name = 'UCSDped2'
+    dataset = unified_dataset_interface(dataset_name=dataset_name, dir=os.path.join('raw_datasets', dataset_name),
+                                        context_frame_num=1, mode='train', border_mode='hard')
+    calc_optical_flow(dataset)
+    dataset = unified_dataset_interface(dataset_name=dataset_name, dir=os.path.join('raw_datasets', dataset_name),
+                                        context_frame_num=1, mode='test', border_mode='hard')
+    calc_optical_flow(dataset)
+    # The optical flow calculation of other datasets is basically the same as above.Change the dataset_name to calculate optical flow of other datasets.
