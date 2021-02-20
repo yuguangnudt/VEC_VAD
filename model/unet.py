@@ -1,7 +1,5 @@
 import torch
-import torchvision
 import torch.nn as nn
-import torch.nn.functional as F
 
 class double_conv(nn.Module):
     '''(conv => BN => ReLU) * 2'''
@@ -72,11 +70,8 @@ class outconv(nn.Module):
         return x
         
 
-class SelfCompleteNet4(nn.Module):#5raw_1of
-    '''
-    rawRange: Int, the idx of raw inputs to be predicted
-    '''
-    def __init__(self, features_root=64, tot_raw_num=5, tot_of_num=1, border_mode='predict', rawRange=None, useFlow=True, padding=True):
+class SelfCompleteNet4(nn.Module):  # 5raw1of
+    def __init__(self, features_root=32, tot_raw_num=5, tot_of_num=1, border_mode='predict', rawRange=None, useFlow=True, padding=True):
         super(SelfCompleteNet4, self).__init__()
 
         assert tot_of_num <= tot_raw_num
@@ -93,8 +88,8 @@ class SelfCompleteNet4(nn.Module):#5raw_1of
                 rawRange += tot_raw_num
             assert rawRange < tot_raw_num
             self.rawRange = range(rawRange, rawRange+1)
-        self.raw_channel_num = 3  # RGB channel no.
-        self.of_channel_num = 2  # optical flow channel no.
+        self.raw_channel_num = 3  # RGB channel number.
+        self.of_channel_num = 2  # optical flow channel number.
         self.tot_of_num = tot_of_num
         self.tot_raw_num = tot_raw_num
         self.raw_of_offset = self.raw_center_idx - self.of_center_idx
@@ -110,6 +105,8 @@ class SelfCompleteNet4(nn.Module):#5raw_1of
         raw_out_channels = self.raw_channel_num
         of_out_channels = self.of_channel_num
 
+        # Different types of incomplete video events, each corresponding to a separate UNet.
+        # Raw pixel completion.
         self.inc0 = inconv(in_channels, features_root)
         self.down01 = down(features_root, features_root * 2)
         self.down02 = down(features_root * 2, features_root * 4)
@@ -135,36 +132,32 @@ class SelfCompleteNet4(nn.Module):#5raw_1of
         self.down42 = down(features_root * 2, features_root * 4)
         self.down43 = down(features_root * 4, features_root * 8)
 
-        # 0
         self.up01 = up(features_root * 8, features_root * 4)
         self.up02 = up(features_root * 4, features_root * 2)
         self.up03 = up(features_root * 2, features_root)
         self.outc0 = outconv(features_root, raw_out_channels)
 
-        # 1
         self.up11 = up(features_root * 8, features_root * 4)
         self.up12 = up(features_root * 4, features_root * 2)
         self.up13 = up(features_root * 2, features_root)
         self.outc1 = outconv(features_root, raw_out_channels)
 
-        # 2
         self.up21 = up(features_root * 8, features_root * 4)
         self.up22 = up(features_root * 4, features_root * 2)
         self.up23 = up(features_root * 2, features_root)
         self.outc2 = outconv(features_root, raw_out_channels)
 
-        # 3
         self.up31 = up(features_root * 8, features_root * 4)
         self.up32 = up(features_root * 4, features_root * 2)
         self.up33 = up(features_root * 2, features_root)
         self.outc3 = outconv(features_root, raw_out_channels)
 
-        # 4
         self.up41 = up(features_root * 8, features_root * 4)
         self.up42 = up(features_root * 4, features_root * 2)
         self.up43 = up(features_root * 2, features_root)
         self.outc4 = outconv(features_root, raw_out_channels)
 
+        # Optical flow completion.
         if useFlow:
             self.inc_of = inconv(in_channels, features_root)
             self.down_of1 = down(features_root, features_root * 2)
@@ -177,7 +170,7 @@ class SelfCompleteNet4(nn.Module):#5raw_1of
             self.outc_of = outconv(features_root, of_out_channels)
 
     def forward(self, x, x_of):
-        # use incomplete inputs to yield complete inputs
+        # Use incomplete inputs to yield complete inputs.
         all_raw_outputs = []
         all_raw_targets = []
         all_of_outputs = []
@@ -190,6 +183,7 @@ class SelfCompleteNet4(nn.Module):#5raw_1of
                 incomplete_x = torch.cat([x[:, :raw_i * self.raw_channel_num, :, :], x[:, (raw_i+1) * self.raw_channel_num: , :, :]], dim=1)
             all_raw_targets.append(x[:, raw_i * self.raw_channel_num:(raw_i + 1) * self.raw_channel_num, :, :])
 
+            # Complete video events (raw pixel).
             if raw_i == 0:
                 x1 = self.inc0(incomplete_x)
                 x2 = self.down01(x1)
@@ -249,8 +243,9 @@ class SelfCompleteNet4(nn.Module):#5raw_1of
                 print('out of range！')
                 raise NotImplementedError
 
+            # Complete video events (optical flow).
             of_i = raw_i - self.raw_of_offset
-            if self.useFlow and of_i >= 0 and of_i < self.tot_of_num:
+            if self.useFlow and 0 <= of_i < self.tot_of_num:
                 ofx1 = self.inc_of(incomplete_x)
                 ofx2 = self.down_of1(ofx1)
                 ofx3 = self.down_of2(ofx2)
@@ -270,14 +265,11 @@ class SelfCompleteNet4(nn.Module):#5raw_1of
             all_of_targets = torch.cat(all_of_targets, dim=1)
 
         return all_of_outputs, all_raw_outputs, all_of_targets, all_raw_targets
-        
-class SelfCompleteNetFull(nn.Module):
-    '''
-    rawRange: Int, the idx of raw inputs to be predicted
-    '''
-    def __init__(self, features_root=64, tot_raw_num=5, tot_of_num=5, border_mode='predict', rawRange=None, useFlow=True, padding=True):
+
+
+class SelfCompleteNetFull(nn.Module):  # 5raw5of
+    def __init__(self, features_root=32, tot_raw_num=5, tot_of_num=5, border_mode='predict', rawRange=None, useFlow=True, padding=True):
         super(SelfCompleteNetFull, self).__init__()
-        assert tot_raw_num <= 5
         assert tot_of_num <= tot_raw_num
         if border_mode == 'predict' or border_mode == 'elasticPredict':
             self.raw_center_idx = tot_raw_num - 1
@@ -292,13 +284,12 @@ class SelfCompleteNetFull(nn.Module):
                 rawRange += tot_raw_num
             assert rawRange < tot_raw_num
             self.rawRange = range(rawRange, rawRange+1)
-        self.raw_channel_num = 3  # RGB channel no.
-        self.of_channel_num = 2  # optical flow channel no.
+        self.raw_channel_num = 3  # RGB channel number.
+        self.of_channel_num = 2  # optical flow channel number.
         self.tot_of_num = tot_of_num
         self.tot_raw_num = tot_raw_num
         
         self.raw_of_offset = self.raw_center_idx - self.of_center_idx
-        #self.raw_of_offset = -1
         
         self.useFlow = useFlow
         self.padding = padding
@@ -312,6 +303,8 @@ class SelfCompleteNetFull(nn.Module):
         raw_out_channels = self.raw_channel_num
         of_out_channels = self.of_channel_num
 
+        # Different types of incomplete video events, each corresponding to a separate UNet.
+        # Raw pixel completion.
         self.inc0 = inconv(in_channels, features_root)
         self.down01 = down(features_root, features_root * 2)
         self.down02 = down(features_root * 2, features_root * 4)
@@ -337,36 +330,32 @@ class SelfCompleteNetFull(nn.Module):
         self.down42 = down(features_root * 2, features_root * 4)
         self.down43 = down(features_root * 4, features_root * 8)
 
-        # 0
         self.up01 = up(features_root * 8, features_root * 4)
         self.up02 = up(features_root * 4, features_root * 2)
         self.up03 = up(features_root * 2, features_root)
         self.outc0 = outconv(features_root, raw_out_channels)
 
-        # 1
         self.up11 = up(features_root * 8, features_root * 4)
         self.up12 = up(features_root * 4, features_root * 2)
         self.up13 = up(features_root * 2, features_root)
         self.outc1 = outconv(features_root, raw_out_channels)
 
-        # 2
         self.up21 = up(features_root * 8, features_root * 4)
         self.up22 = up(features_root * 4, features_root * 2)
         self.up23 = up(features_root * 2, features_root)
         self.outc2 = outconv(features_root, raw_out_channels)
 
-        # 3
         self.up31 = up(features_root * 8, features_root * 4)
         self.up32 = up(features_root * 4, features_root * 2)
         self.up33 = up(features_root * 2, features_root)
         self.outc3 = outconv(features_root, raw_out_channels)
 
-        # 4
         self.up41 = up(features_root * 8, features_root * 4)
         self.up42 = up(features_root * 4, features_root * 2)
         self.up43 = up(features_root * 2, features_root)
         self.outc4 = outconv(features_root, raw_out_channels)
 
+        # Optical flow completion.
         if useFlow:
             self.inc_of0 = inconv(in_channels, features_root)
             self.down_of01 = down(features_root, features_root * 2)
@@ -419,7 +408,7 @@ class SelfCompleteNetFull(nn.Module):
             self.outc_of4 = outconv(features_root, of_out_channels)
 
     def forward(self, x, x_of):
-        # use incomplete inputs to yield complete inputs
+        # Use incomplete inputs to yield complete inputs.
         all_raw_outputs = []
         all_raw_targets = []
         all_of_outputs = []
@@ -431,7 +420,6 @@ class SelfCompleteNetFull(nn.Module):
             else:
                 incomplete_x = torch.cat([x[:, :raw_i * self.raw_channel_num, :, :], x[:, (raw_i+1) * self.raw_channel_num: , :, :]], dim=1)
             all_raw_targets.append(x[:, raw_i * self.raw_channel_num:(raw_i + 1) * self.raw_channel_num, :, :])
-
 
             if raw_i == 0:
                 x1 = self.inc0(incomplete_x)
@@ -493,7 +481,7 @@ class SelfCompleteNetFull(nn.Module):
                 raise NotImplementedError
 
             of_i = raw_i - self.raw_of_offset
-            if self.useFlow and of_i >= 0 and of_i < self.tot_of_num:
+            if self.useFlow and 0 <= of_i < self.tot_of_num:
                 if of_i == 0:
                     ofx1 = self.inc_of0(incomplete_x)
                     ofx2 = self.down_of01(ofx1)
@@ -566,8 +554,9 @@ class SelfCompleteNetFull(nn.Module):
             all_of_targets = torch.cat(all_of_targets, dim=1)
 
         return all_of_outputs, all_raw_outputs, all_of_targets, all_raw_targets
-        
-class SelfCompleteNet1raw1of(nn.Module):#1raw_1of
+
+
+class SelfCompleteNet1raw1of(nn.Module):  # 1raw1of
     '''
     rawRange: Int, the idx of raw inputs to be predicted
     '''
