@@ -236,8 +236,8 @@ if __name__ == '__main__':
     print('Extracting bboxes of {}-th frame'.format(idx + 1))
     cur_img = img_tensor2numpy(batch[1])
 
-    config_file = '../obj_det_config/cascade_rcnn_r101_fpn_1x.py'
-    checkpoint_file = '../obj_det_checkpoints/cascade_rcnn_r101_fpn_1x_20181129-d64ebac7.pth'
+    config_file = 'obj_det_config/cascade_rcnn_r101_fpn_1x.py'
+    checkpoint_file = 'obj_det_checkpoints/cascade_rcnn_r101_fpn_1x_20181129-d64ebac7.pth'
     model = init_detector(config_file, checkpoint_file, device='cuda:0')
 
     ap_bboxes = get_ap_bboxes(cur_img, model, dataset_name, True)
