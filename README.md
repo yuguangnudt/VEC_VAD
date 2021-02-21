@@ -23,6 +23,7 @@ Recently (2021.2) I noticed that the interface of mmdet  v1.0rc0 has changed. If
 Download UCSDped2 from [official website](http://svcl.ucsd.edu/projects/anomaly/dataset.htm) , avenue and Shanghaitech from [OneDrive](https://onedrive.live.com/?authkey=%21AMqh2fTSemfrokE&id=3705E349C336415F%215109&cid=3705E349C336415F) or [BaiduYunPan](https://pan.baidu.com/s/1j0TEt-2Dw3kcfdX-LCF0YQ) (code:i9b3, provided by [StevenLiuWen](https://github.com/StevenLiuWen/ano_pred_cvpr2018)) , and [ground truth](www.cse.cuhk.edu.hk/leojia/projects/detectabnormal/ground_truth_demo.zip) of avenue from [official website](http://www.cse.cuhk.edu.hk/leojia/projects/detectabnormal/dataset.html). Create a folder named `raw_datasets` in root directory to store the downloaded datasets. The directory structure should be organized to match `vad_datasets.py` as follows (Refer to the entire project directory structure in `directory_structure.txt`): 
 
 ```
+.
 ├── ...
 ├── obj_det_config
 ├── raw_datasets
