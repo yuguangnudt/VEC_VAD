@@ -1,0 +1,99 @@
+.
+├── calc_optical_flow.py
+├── config.cfg
+├── data
+│   └── raw2flow
+│       ├── avenue_foreground_bbox_test_obj_det_with_motion.npy
+│       ├── avenue_foreground_test_obj_det_with_motion-flow.npy
+│       ├── avenue_foreground_test_obj_det_with_motion-raw.npy
+│       ├── avenue_foreground_train_obj_det_with_motion-flow.npy
+│       ├── avenue_foreground_train_obj_det_with_motion-raw.npy
+│       ├── avenue_model_obj_det_with_motion_SelfComplete.npy
+│       ├── avenue_of_training_scores_obj_det_with_motion_SelfComplete.npy
+│       ├── avenue_raw_training_scores_obj_det_with_motion_SelfComplete.npy
+├── flowlib.py
+├── FlowNet2_src
+│   ├── datasets.py
+│   ├── example
+│   │   ├── 0img0.ppm
+│   │   ├── 0img1.ppm
+│   │   ├── 1img0.ppm
+│   │   ├── 1img1.ppm
+│   │   └── flow0.png
+│   ├── flowlib.py
+│   ├── __init__.py
+│   ├── install.sh
+│   ├── losses.py
+│   ├── main.py
+│   ├── models
+│   │   ├── components
+│   │   ├── flownet2.py
+│   │   ├── __init__.py
+│   │   └── __pycache__
+│   ├── pretrained
+│   │   └── FlowNet2_checkpoint.pth.tar
+│   └── utils
+│       ├── flow_utils.py
+│       ├── frame_utils.py
+│       ├── __init__.py
+│       ├── param_utils.py
+│       └── tools.py
+├── fore_det
+│   ├── inference.py
+│   ├── __init__.py
+│   ├── obj_det_checkpoints
+│   │   └── cascade_rcnn_r101_fpn_1x_20181129-d64ebac7.pth
+│   ├── obj_det_config
+│   │   └── cascade_rcnn_r101_fpn_1x.py
+│   ├── obj_det_with_motion.py
+│   └── simple_patch.py
+├── helper
+│   ├── eval_accuracy.py
+│   ├── misc.py
+│   └── visualization_helper.py
+├── model
+│   └── unet.py
+├── optical_flow
+│   ├── avenue
+│   │   ├── testing
+│   │   └── training
+│   ├── ShanghaiTech
+│   │   ├── Testing
+│   │   └── training
+│   └── UCSDped2
+│       ├── Test
+│       └── Train
+├── raw_datasets
+│   ├── avenue
+│   │   ├── bboxes_test_obj_det_with_motion.npy
+│   │   ├── bboxes_train_obj_det_with_motion.npy
+│   │   ├── ground_truth_demo
+│   │   ├── testing
+│   │   └── training
+│   ├── ShanghaiTech
+│   │   ├── bboxes_test_obj_det_with_motion.npy
+│   │   ├── bboxes_train_obj_det_with_motion.npy
+│   │   ├── extract_frames.py
+│   │   ├── Testing
+│   │   ├── training
+│   │   └── training.zip
+│   ├── UCSDped2
+│   │   ├── bboxes_test_obj_det_with_motion.npy
+│   │   ├── bboxes_train_obj_det_with_motion.npy
+│   │   ├── Test
+│   │   └── Train
+├── results
+│   ├── avenue
+│   │   ├── raw2flow_obj_det_with_of_SelfComplete_frame_results.npz
+│   │   └── score_mask
+│   ├── ShanghaiTech
+│   │   ├── raw2flow_obj_det_with_of_SelfComplete_frame_results_scene_1.npz
+│   │   └── score_mask
+│   └── UCSDped2
+│       ├── raw2flow_obj_det_with_of_SelfComplete_frame_results.npz
+│       └── score_mask
+├── test.py
+├── train_and_test.sh
+├── train.py
+├── utils.py
+└── vad_datasets.py
