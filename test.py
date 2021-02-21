@@ -41,8 +41,8 @@ except:
     raise NotImplementedError
 
 #  /*--------------------------------------------------Foreground localization-----------------------------------------------------*/
-config_file = './obj_det_config/cascade_rcnn_r101_fpn_1x.py'
-checkpoint_file = './obj_det_checkpoints/cascade_rcnn_r101_fpn_1x_20181129-d64ebac7.pth'
+config_file = 'fore_det/obj_det_config/cascade_rcnn_r101_fpn_1x.py'
+checkpoint_file = 'fore_det/obj_det_checkpoints/cascade_rcnn_r101_fpn_1x_20181129-d64ebac7.pth'
 
 # Set dataset for foreground localization.
 dataset = unified_dataset_interface(dataset_name=dataset_name, dir=os.path.join(raw_dataset_dir, dataset_name),
