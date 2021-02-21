@@ -213,6 +213,16 @@ if scores_saved is False:
         assert modality == 'raw2flow'
         score_func = nn.MSELoss(reduce=False)
 
+        if tot_of_num == 1:
+            network_architecture = SelfCompleteNet4(features_root=cp.getint(method, 'nf'), tot_raw_num=tot_frame_num, tot_of_num=tot_of_num,
+                                                    border_mode=border_mode, rawRange=rawRange, useFlow=useFlow, padding=padding)
+        elif tot_of_num == 5:
+            network_architecture = SelfCompleteNetFull(features_root=cp.getint(method, 'nf'), tot_raw_num=tot_frame_num, tot_of_num=tot_of_num,
+                                                       border_mode=border_mode, rawRange=rawRange, useFlow=useFlow, padding=padding)
+        else:
+            NotImplementedError
+        assert tot_frame_num == 5
+
         pixel_result_dir = os.path.join(results_dir, dataset_name, 'score_mask')
         os.makedirs(pixel_result_dir, exist_ok=True)
 
@@ -224,9 +234,7 @@ if scores_saved is False:
                 for hh in range(len(model_weights[ss])):
                     for ww in range(len(model_weights[ss][hh])):
                         if len(model_weights[ss][hh][ww]) > 0:
-                            cur_model = torch.nn.DataParallel(
-                                SelfCompleteNetFull(features_root=cp.getint(method, 'nf'), tot_raw_num=tot_frame_num, tot_of_num=tot_of_num,
-                                                    border_mode=border_mode, rawRange=rawRange, useFlow=useFlow, padding=padding), device_ids=[0]).cuda()
+                            cur_model = torch.nn.DataParallel(network_architecture, device_ids=[0]).cuda()
                             cur_model.load_state_dict(model_weights[ss][hh][ww][0])
                             model_set[ss][hh][ww].append(cur_model.eval())
 
@@ -244,9 +252,7 @@ if scores_saved is False:
             for hh in range(len(model_weights)):
                 for ww in range(len(model_weights[hh])):
                     if len(model_weights[hh][ww]) > 0:
-                        cur_model = torch.nn.DataParallel(
-                            SelfCompleteNetFull(features_root=cp.getint(method, 'nf'), tot_raw_num=tot_frame_num, tot_of_num=tot_of_num,
-                                                border_mode=border_mode, rawRange=rawRange, useFlow=useFlow, padding=padding), device_ids=[0]).cuda()
+                        cur_model = torch.nn.DataParallel(network_architecture, device_ids=[0]).cuda()
                         cur_model.load_state_dict(model_weights[hh][ww][0])
                         model_set[hh][ww].append(cur_model.eval())
 

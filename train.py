@@ -255,8 +255,18 @@ if method == 'SelfComplete':
     padding = cp.getboolean(method, 'padding')
     lambda_raw = cp.getfloat(method, 'lambda_raw')
     lambda_of = cp.getfloat(method, 'lambda_of')
-
     assert modality == 'raw2flow'
+
+    if tot_of_num == 1:
+        network_architecture = SelfCompleteNet4(features_root=cp.getint(method, 'nf'), tot_raw_num=tot_frame_num, tot_of_num=tot_of_num,
+                                                border_mode=border_mode, rawRange=rawRange, useFlow=useFlow, padding=padding)
+    elif tot_of_num == 5:
+        network_architecture = SelfCompleteNetFull(features_root=cp.getint(method, 'nf'), tot_raw_num=tot_frame_num, tot_of_num=tot_of_num,
+                                                   border_mode=border_mode, rawRange=rawRange, useFlow=useFlow, padding=padding)
+    else:
+        NotImplementedError
+    assert tot_frame_num == 5
+
     if dataset_name == 'ShanghaiTech':
         model_set = [[[[] for ww in range(w_block)] for hh in range(h_block)] for ss in range(frame_size[dataset_name][-1])]
         raw_training_scores_set = [[[[] for ww in range(w_block)] for hh in range(h_block)] for ss in range(frame_size[dataset_name][-1])]
@@ -276,9 +286,7 @@ if method == 'SelfComplete':
                     raw_losses = AverageMeter()
                     of_losses = AverageMeter()
                     # Prepare UNet model and training parameters for current block
-                    cur_model = torch.nn.DataParallel(
-                        SelfCompleteNetFull(features_root=cp.getint(method, 'nf'), tot_raw_num=tot_frame_num, tot_of_num=tot_of_num,
-                                            border_mode=border_mode, rawRange=rawRange, useFlow=useFlow, padding=padding)).cuda()
+                    cur_model = torch.nn.DataParallel(network_architecture).cuda()
                     optimizer = optim.Adam(cur_model.parameters(), eps=1e-7, weight_decay=0.000)
                     cur_model.train()
                     for epoch in range(epochs):
@@ -364,11 +372,8 @@ if method == 'SelfComplete':
                     cur_dataset = cube_to_train_dataset(cur_training_data, target=cur_training_data2)
                     cur_dataloader = DataLoader(dataset=cur_dataset, batch_size=batch_size, shuffle=True)
 
-                    cur_model = torch.nn.DataParallel(SelfCompleteNetFull(features_root=cp.getint(method, 'nf'),
-                                                                          tot_raw_num=tot_frame_num, tot_of_num=tot_of_num, border_mode=border_mode,
-                                                                          rawRange=rawRange, useFlow=useFlow, padding=padding)).cuda()
+                    cur_model = torch.nn.DataParallel(network_architecture).cuda()
                     optimizer = optim.Adam(cur_model.parameters(), eps=1e-7, weight_decay=0.0)
-
                     cur_model.train()
                     for epoch in range(epochs):
                         for idx, (inputs, of_targets_all, _) in enumerate(cur_dataloader):
