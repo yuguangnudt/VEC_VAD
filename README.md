@@ -22,7 +22,7 @@ Recently (2021.2) I noticed that the interface of mmdet  v1.0rc0 has changed. If
 
 Download UCSDped2 from [official website](http://svcl.ucsd.edu/projects/anomaly/dataset.htm) , avenue and Shanghaitech from [OneDrive](https://onedrive.live.com/?authkey=%21AMqh2fTSemfrokE&id=3705E349C336415F%215109&cid=3705E349C336415F) or [BaiduYunPan](https://pan.baidu.com/s/1j0TEt-2Dw3kcfdX-LCF0YQ) (code:i9b3, provided by [StevenLiuWen](https://github.com/StevenLiuWen/ano_pred_cvpr2018)) , and [ground truth](www.cse.cuhk.edu.hk/leojia/projects/detectabnormal/ground_truth_demo.zip) of avenue from [official website](http://www.cse.cuhk.edu.hk/leojia/projects/detectabnormal/dataset.html). Create a folder named `raw_datasets` in root directory to store the downloaded datasets. The directory structure should be organized to match `vad_datasets.py` as follows (Refer to the entire project directory structure in `directory_structure.txt`): 
 
-.
+```
 ├── ...
 ├── obj_det_config
 ├── raw_datasets
@@ -46,6 +46,7 @@ Download UCSDped2 from [official website](http://svcl.ucsd.edu/projects/anomaly/
  │   │   └── Train
 ├── calc_optical_flow.py
 ├── ...
+```
 
 **Note:** (1) I have uploaded the extracted foreground bounding boxes (`bboxes_test_obj_det_with_motion.npy`, `bboxes_train_obj_det_with_motion.npy`) to facilitate testing and training. Please set `train_bbox_saved=True` and `test_bbox_saved=True`  in `config.cfg` to load the extracted bboxes directly if you don't want to extract bboxes using mmdet. (2) ShanghaiTech's training set provides videos rather than video frames, which need to be extracted. I have uploaded  `extract_frames.py` to extract the video frames. After downloading and unzipping ShanghaiTech, run `extract_frames.py` to get the video frames.
 
