@@ -224,7 +224,7 @@ if scores_saved is False:
         assert tot_frame_num == 5
 
         pixel_result_dir = os.path.join(results_dir, dataset_name, 'score_mask')
-        os.makedirs(pixel_result_dir, exist_ok=True)
+        os.makedirs(pixel_result_dir, exist_ok=True)  # A folder to store frame pixel results.
 
         # Load saved models.
         model_weights = torch.load(os.path.join(data_root_dir, modality, dataset_name + '_' + 'model_{}_{}.npy'.format(foreground_extraction_mode, method)))
