@@ -22,7 +22,7 @@ cp.read("config.cfg")
 dataset_name = cp.get('shared_parameters', 'dataset_name')  # The name of dataset: UCSDped2/avenue/ShanghaiTech.
 raw_dataset_dir = cp.get('shared_parameters', 'raw_dataset_dir')  # Fixed
 foreground_extraction_mode = cp.get('shared_parameters', 'foreground_extraction_mode')  # Foreground extraction method: obj_det_with_motion/obj_det/simple_patch/frame.
-data_root_dir = cp.get('shared_parameters', 'data_root_dir')  # Fixed
+data_root_dir = cp.get('shared_parameters', 'data_root_dir')  # Fixed: A folder that stores the data such as foreground produced by the program.
 modality = cp.get('shared_parameters', 'modality')  # Fixed
 mode = cp.get('train_parameters', 'mode')  # Fixed
 method = cp.get('shared_parameters', 'method')  # Fixed
