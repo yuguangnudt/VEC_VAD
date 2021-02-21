@@ -47,8 +47,7 @@ Download UCSDped2 from [official website](http://svcl.ucsd.edu/projects/anomaly/
  │   │   └── Train
 ├── calc_optical_flow.py
 ├── ...</p>
-
-**Note:** (1) I have uploaded the extracted bounding boxes (`bboxes_test_obj_det_with_motion.npy`, `bboxes_train_obj_det_with_motion.npy`) to facilitate testing and training. Please set `train_bbox_saved=True` and `test_bbox_saved=True`  in `config.cfg` to load the extracted bboxes directly If you don't want to extract bboxes using mmdet. (2) ShanghaiTech's training set provides videos rather than video frames, which need to be extracted. I have uploaded  `extract_frames.py` to extract the video frames. After downloading and unzipping ShanghaiTech, run `extract_frames.py` to get the video frames.
+**Note:** (1) I have uploaded the extracted foreground bounding boxes (`bboxes_test_obj_det_with_motion.npy`, `bboxes_train_obj_det_with_motion.npy`) to facilitate testing and training. Please set `train_bbox_saved=True` and `test_bbox_saved=True`  in `config.cfg` to load the extracted bboxes directly if you don't want to extract bboxes using mmdet. (2) ShanghaiTech's training set provides videos rather than video frames, which need to be extracted. I have uploaded  `extract_frames.py` to extract the video frames. After downloading and unzipping ShanghaiTech, run `extract_frames.py` to get the video frames.
 
 ## 3. Calculate optical flow
 
