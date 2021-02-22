@@ -16,7 +16,7 @@ This repository is the official implementation of [Cloze Test Helps: Effective V
 
 Refer to the full environment in [issue](https://github.com/yuguangnudt/VEC_VAD/issues/2).  Note that our project is based on mmdet v1.0rc0. Run the program strictly according to our environment, or might try the newer versions of mmdet, PyTorch and mmcv.
 
-Recently (2021.2) I noticed that the interface of mmdet  v1.0rc0 has changed. If you installed mmdet v1.0rc0 and got "No module named 'mmdet.datasets.pipelines' " when running the program, please refer to [issue](https://github.com/yuguangnudt/VEC_VAD/issues/9#issuecomment-768020917) to fix the bug.
+Recently (2021.1) the interface of mmdet v1.0rc0 seems to have changed. If you install mmdet v1.0rc0 and get "No module named 'mmdet.datasets.pipelines' " when running the program, please refer to [issue](https://github.com/yuguangnudt/VEC_VAD/issues/9#issuecomment-768020917) to fix the bug.
 
 ## 2. Download and organize datasets
 
@@ -25,7 +25,6 @@ Download UCSDped2 from [official website](http://svcl.ucsd.edu/projects/anomaly/
 ```
 .
 ├── ...
-├── obj_det_config
 ├── raw_datasets
  │   ├── avenue
  │   │   ├── bboxes_test_obj_det_with_motion.npy
@@ -49,7 +48,7 @@ Download UCSDped2 from [official website](http://svcl.ucsd.edu/projects/anomaly/
 ├── ...
 ```
 
-**Note:** (1) I have uploaded the extracted foreground bounding boxes (`bboxes_test_obj_det_with_motion.npy`, `bboxes_train_obj_det_with_motion.npy`) to facilitate testing and training. Please set `train_bbox_saved=True` and `test_bbox_saved=True`  in `config.cfg` to load the extracted bboxes directly if you don't want to extract bboxes using mmdet. (2) ShanghaiTech's training set provides videos rather than video frames, which need to be extracted. I have uploaded  `extract_frames.py` to extract the video frames. After downloading and unzipping ShanghaiTech, run `extract_frames.py` to get the video frames.
+**Note:** (1) To facilitate testing and training, extracted foreground bounding boxes (`bboxes_test_obj_det_with_motion.npy`, `bboxes_train_obj_det_with_motion.npy`)  have been uploaded to the directories of each dataset. Please set `train_bbox_saved=True` and `test_bbox_saved=True`  in `config.cfg` to load the extracted bboxes directly if you don't want to extract bboxes using mmdet. (2) ShanghaiTech's training set provides videos rather than video frames, which need to be extracted manually. `extract_frames.py` have been uploaded to `./raw_datasets/ShanghaiTech` for video frame extraction. After downloading and unzipping ShanghaiTech, run `extract_frames.py` to get the video frames of ShanghaiTech training set.
 
 ## 3. Calculate optical flow
 
@@ -59,7 +58,7 @@ Download UCSDped2 from [official website](http://svcl.ucsd.edu/projects/anomaly/
 
 ## 4.  Test on saved models
 
-(1) Follow the [instructions](https://github.com/open-mmlab/mmdetection/tree/v1.0rc0) to install mmdetection (might use `git clone -b v1.0rc0 https://github.com/open-mmlab/mmdetection.git` to clone old version of mmdetection). Then download the pretrained object detector [Cascade R-CNN](https://s3.ap-northeast-2.amazonaws.com/open-mmlab/mmdetection/models/cascade_rcnn_r101_fpn_1x_20181129-d64ebac7.pth), and move it to `fore_det/obj_det_checkpoints` (create a folder named obj_det_checkpoints).
+(1) Follow the [instructions](https://github.com/open-mmlab/mmdetection/tree/v1.0rc0) to install mmdet (might use `git clone -b v1.0rc0 https://github.com/open-mmlab/mmdetection.git` to clone old version of mmdetection). Then download the pretrained object detector [Cascade R-CNN](https://s3.ap-northeast-2.amazonaws.com/open-mmlab/mmdetection/models/cascade_rcnn_r101_fpn_1x_20181129-d64ebac7.pth), and move it to `fore_det/obj_det_checkpoints` (create a folder named obj_det_checkpoints).
 
 (2) Select the model in `./data/raw2flow`, and move the files in the model folder (such as `avenue_model_5raw1of_auc0.902`) into `./data/raw2flow`. 
 
