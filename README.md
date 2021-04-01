@@ -1,6 +1,6 @@
-## [Cloze Test Helps: Effective Video Anomaly Detection via Learning to Complete Video Events](https://www.researchgate.net/publication/343809709_Cloze_Test_Helps_Effective_Video_Anomaly_Detection_via_Learning_to_Complete_Video_Events)
+## Video Abnormal Event Detection by Learning to Complete Visual Cloze Tests
 
-This repository is the official implementation of [Cloze Test Helps: Effective Video Anomaly Detection via Learning to Complete Video Events](https://dl.acm.org/doi/10.1145/3394171.3413973) (oral paper In ACM Multimedia 2020) by Guang Yu, Siqi Wang, Zhiping Cai, En Zhu, Chuanfu Xu, Jianping Yin, Marius Kloft. 
+This repository is the official extension of [Cloze Test Helps: Effective Video Anomaly Detection via Learning to Complete Video Events](https://dl.acm.org/doi/10.1145/3394171.3413973) (oral paper In ACM Multimedia 2020). Further maintenance and updates will be done.
 
 ## 1. Environment
 
@@ -27,28 +27,22 @@ Download UCSDped2 from [official website](http://svcl.ucsd.edu/projects/anomaly/
 ├── ...
 ├── raw_datasets
  │   ├── avenue
- │   │   ├── bboxes_test_obj_det_with_motion.npy
- │   │   ├── bboxes_train_obj_det_with_motion.npy
  │   │   ├── ground_truth_demo
  │   │   ├── testing
  │   │   └── training
  │   ├── ShanghaiTech
- │   │   ├── bboxes_test_obj_det_with_motion.npy
- │   │   ├── bboxes_train_obj_det_with_motion.npy
  │   │   ├── extract_frames.py
  │   │   ├── Testing
  │   │   ├── training
  │   │   └── training.zip
  │   ├── UCSDped2
- │   │   ├── bboxes_test_obj_det_with_motion.npy
- │   │   ├── bboxes_train_obj_det_with_motion.npy
  │   │   ├── Test
  │   │   └── Train
 ├── calc_optical_flow.py
 ├── ...
 ```
 
-**Note:** (1) To facilitate testing and training, extracted foreground bounding boxes (`bboxes_test_obj_det_with_motion.npy`, `bboxes_train_obj_det_with_motion.npy`)  have been uploaded to the directories of each dataset. Please set `train_bbox_saved=True` and `test_bbox_saved=True`  in `config.cfg` to load the extracted bboxes directly if you don't want to extract bboxes using mmdet. (2) ShanghaiTech's training set provides videos rather than video frames, which need to be extracted manually. `extract_frames.py` have been uploaded to `./raw_datasets/ShanghaiTech` for video frame extraction. After downloading and unzipping ShanghaiTech, run `extract_frames.py` to get the video frames of ShanghaiTech training set.
+**Note:** ShanghaiTech's training set provides videos rather than video frames, which need to be extracted manually. `extract_frames.py` have been uploaded to `./raw_datasets/ShanghaiTech` for video frame extraction. After downloading and unzipping ShanghaiTech, run `extract_frames.py` to get the video frames of ShanghaiTech training set.
 
 ## 3. Calculate optical flow
 
@@ -70,25 +64,7 @@ Download UCSDped2 from [official website](http://svcl.ucsd.edu/projects/anomaly/
 
 Edit the file `config.cfg` according to Experimental Settings in our paper or your requirements, and run `train.py`: `python train.py`.
 
-## 6. Performance
 
-| Dataset | UCSDped2 | avenue | ShanghaiTech |
-| :-----: | :------: | :----: | :----------: |
-|  AUROC  |  97.3%   | 90.2%  |    74.8%     |
-
-Extensions and higher performance will be released!
-
-## 7. Citation
-
-```
-@inproceedings{yu2020cloze,
-  title={Cloze Test Helps: Effective Video Anomaly Detection via Learning to Complete  	  Video Events},
-  author={Yu, Guang and Wang, Siqi and Cai, Zhiping and Zhu, En and Xu, Chuanfu and Yin, Jianping and Kloft, Marius},
-  booktitle={Proceedings of the 28th ACM International Conference on Multimedia},
-  pages={583--591},
-  year={2020}
-}
-```
 
 
 

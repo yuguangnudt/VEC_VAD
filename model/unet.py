@@ -1,5 +1,6 @@
 import torch
 import torch.nn as nn
+from itertools import combinations
 
 class double_conv(nn.Module):
     '''(conv => BN => ReLU) * 2'''
@@ -651,4 +652,118 @@ class SelfCompleteNet1raw1of(nn.Module):  # 1raw1of
         
         return of_output, raw_output, of_target, raw_target
 
+
+class SelfCompleteNetCnm(nn.Module):
+    '''
+    rawRange: Int, the idx of raw inputs to be predicted
+    m: the number of erased patches
+    '''
+
+    def __init__(self, features_root=32, tot_raw_num=5, tot_of_num=5, border_mode='predict', rawRange=None,
+                 useFlow=True, padding=True, m=1):
+        super(SelfCompleteNetCnm, self).__init__()
+        assert tot_of_num <= tot_raw_num
+        if border_mode == 'predict' or border_mode == 'elasticPredict':
+            self.raw_center_idx = tot_raw_num - 1
+            self.of_center_idx = tot_of_num - 1
+        else:
+            self.raw_center_idx = (tot_raw_num - 1) // 2
+            self.of_center_idx = (tot_of_num - 1) // 2
+        if rawRange is None:
+            self.rawRange = range(tot_raw_num)
+        else:
+            if rawRange < 0:
+                rawRange += tot_raw_num
+            assert rawRange < tot_raw_num
+            self.rawRange = range(rawRange, rawRange + 1)
+        self.raw_channel_num = 3  # RGB channel no.
+        self.of_channel_num = 2  # optical flow channel no.
+        self.tot_of_num = tot_of_num
+        self.tot_raw_num = tot_raw_num
+
+        self.useFlow = useFlow
+        self.padding = padding
+
+        if self.padding:
+            in_channels = self.raw_channel_num * tot_raw_num
+        else:
+            in_channels = self.raw_channel_num * (tot_raw_num - m)
+
+        raw_out_channels = self.raw_channel_num * m
+        of_out_channels = self.of_channel_num * m
+
+        self.combination = [list(c) for c in combinations(self.rawRange, m)]  # C(n, m)
+
+        self.inconv_modules = nn.ModuleList([inconv(in_channels, features_root) for i in range(len(self.combination))])
+        self.down1_modules = nn.ModuleList([down(features_root, features_root * 2) for i in range(len(self.combination))])
+        self.down2_modules = nn.ModuleList([down(features_root * 2, features_root * 4) for i in range(len(self.combination))])
+        self.down3_modules = nn.ModuleList([down(features_root * 4, features_root * 8) for i in range(len(self.combination))])
+        self.up1_modules = nn.ModuleList([up(features_root * 8, features_root * 4) for i in range(len(self.combination))])
+        self.up2_modules = nn.ModuleList([up(features_root * 4, features_root * 2) for i in range(len(self.combination))])
+        self.up3_modules = nn.ModuleList([up(features_root * 2, features_root) for i in range(len(self.combination))])
+        self.outconv_modules = nn.ModuleList([outconv(features_root, raw_out_channels) for i in range(len(self.combination))])
+
+        if useFlow:
+            self.inconv_of_modules = nn.ModuleList([inconv(in_channels, features_root) for i in range(len(self.combination))])
+            self.down1_of_modules = nn.ModuleList([down(features_root, features_root * 2) for i in range(len(self.combination))])
+            self.down2_of_modules = nn.ModuleList([down(features_root * 2, features_root * 4) for i in range(len(self.combination))])
+            self.down3_of_modules = nn.ModuleList([down(features_root * 4, features_root * 8) for i in range(len(self.combination))])
+            self.up1_of_modules = nn.ModuleList([up(features_root * 8, features_root * 4) for i in range(len(self.combination))])
+            self.up2_of_modules = nn.ModuleList([up(features_root * 4, features_root * 2) for i in range(len(self.combination))])
+            self.up3_of_modules = nn.ModuleList([up(features_root * 2, features_root) for i in range(len(self.combination))])
+            self.outconv_of_modules = nn.ModuleList([outconv(features_root, of_out_channels) for i in range(len(self.combination))])
+
+    def forward(self, x, x_of):
+        # use incomplete inputs to yield complete inputs
+        all_raw_outputs = []
+        all_raw_targets = []
+        all_of_outputs = []
+        all_of_targets = []
+        for idx, c in enumerate(self.combination):
+            for i in c:
+                all_raw_targets.append(x[:, i * self.raw_channel_num:(i+1) * self.raw_channel_num, :, :])
+                all_of_targets.append(x_of[:, i * self.of_channel_num:(i+1) * self.of_channel_num, :, :])
+
+            remain_idx = list(set(self.rawRange).difference(set(c)))  # difference set
+            remain_idx.sort(key=self.rawRange.index)  # original order
+            if self.padding:
+                incomplete_x = x.clone()
+                for i in c:
+                    incomplete_x[:, i * self.raw_channel_num:(i + 1) * self.raw_channel_num, :, :] = 0
+            else:
+                incomplete_x = []
+                for i in remain_idx:
+                    incomplete_x.append(x[:, i * self.raw_channel_num:(i+1) * self.raw_channel_num, :, :])
+                incomplete_x = torch.cat(incomplete_x, dim=1)
+
+            x1 = self.inconv_modules[idx](incomplete_x)
+            x2 = self.down1_modules[idx](x1)
+            x3 = self.down2_modules[idx](x2)
+            x4 = self.down3_modules[idx](x3)
+
+            raw = self.up1_modules[idx](x4, x3)
+            raw = self.up2_modules[idx](raw, x2)
+            raw = self.up3_modules[idx](raw, x1)
+            raw = self.outconv_modules[idx](raw)
+            all_raw_outputs.append(raw)
+
+            if self.useFlow:
+                ofx1 = self.inconv_of_modules[idx](incomplete_x)
+                ofx2 = self.down1_of_modules[idx](ofx1)
+                ofx3 = self.down2_of_modules[idx](ofx2)
+                ofx4 = self.down3_of_modules[idx](ofx3)
+
+                of = self.up1_of_modules[idx](ofx4, ofx3)
+                of = self.up2_of_modules[idx](of, ofx2)
+                of = self.up3_of_modules[idx](of, ofx1)
+                of = self.outconv_of_modules[idx](of)
+                all_of_outputs.append(of)
+
+        all_raw_outputs = torch.cat(all_raw_outputs, dim=1)
+        all_raw_targets = torch.cat(all_raw_targets, dim=1)
+        if len(all_of_outputs) > 0:
+            all_of_outputs = torch.cat(all_of_outputs, dim=1)
+            all_of_targets = torch.cat(all_of_targets, dim=1)
+
+        return all_of_outputs, all_raw_outputs, all_of_targets, all_raw_targets
 

@@ -1,26 +1,28 @@
-import torch
 import numpy as np
 import os
 from torch.utils.data import DataLoader
 from vad_datasets import unified_dataset_interface
 from fore_det.inference import init_detector
 from vad_datasets import bbox_collate, img_tensor2numpy, img_batch_tensor2numpy, frame_size, cube_to_train_dataset
-from fore_det.obj_det_with_motion import imshow_bboxes, get_ap_bboxes, get_mt_bboxes, del_cover_bboxes
+from fore_det.obj_det_with_motion import imshow_bboxes, getObBboxes, getGdBboxes, getOfBboxes, delCoverBboxes
 from fore_det.simple_patch import get_patch_loc
-import cv2
-from model.unet import SelfCompleteNet4, SelfCompleteNetFull, SelfCompleteNet1raw1of
+import torch
+from model.unet import SelfCompleteNetCnm
+from model.rnn_unet import LSTM_Unet_Cnm3
 import torch.nn as nn
 from utils import save_roc_pr_curve_data, calc_block_idx
 from configparser import ConfigParser
-from helper.visualization_helper import visualize_pair, visualize_batch, visualize_pair_map
+from helper.visualization_helper import visualize_pair, visualize_batch, visualize_pair_map, visualize_score, visualize_img
+import pytorch_ssim
+
 
 #  /*-------------------------------------------------Overall parameter setting-----------------------------------------------------*/
 cp = ConfigParser()
 cp.read("config.cfg")
 
-dataset_name = cp.get('shared_parameters', 'dataset_name')  # The name of dataset: UCSDped2/avenue/ShanghaiTech.
+dataset_name = cp.get('shared_parameters', 'dataset_name')  # The name of dataset.
 raw_dataset_dir = cp.get('shared_parameters', 'raw_dataset_dir')  # Fixed
-foreground_extraction_mode = cp.get('shared_parameters', 'foreground_extraction_mode')  # Foreground extraction method: obj_det_with_motion/obj_det/simple_patch/frame.
+foreground_extraction_mode = cp.get('shared_parameters', 'foreground_extraction_mode')
 data_root_dir = cp.get('shared_parameters', 'data_root_dir')  # Fixed: A folder that stores the data such as foreground produced by the program.
 modality = cp.get('shared_parameters', 'modality')  # Fixed
 mode = cp.get('test_parameters', 'mode')  # Fixed
@@ -44,38 +46,61 @@ except:
 config_file = 'fore_det/obj_det_config/cascade_rcnn_r101_fpn_1x.py'
 checkpoint_file = 'fore_det/obj_det_checkpoints/cascade_rcnn_r101_fpn_1x_20181129-d64ebac7.pth'
 
-# Set dataset for foreground localization.
-dataset = unified_dataset_interface(dataset_name=dataset_name, dir=os.path.join(raw_dataset_dir, dataset_name),
-                                    context_frame_num=1, mode=mode, border_mode='hard')
+# set dataset for foreground extraction
+# raw dataset
+dataset = unified_dataset_interface(dataset_name=dataset_name, dir=os.path.join('raw_datasets', dataset_name), context_frame_num=1, mode=mode, border_mode='hard')
+# optical flow dataset
+dataset2 = unified_dataset_interface(dataset_name=dataset_name, dir=os.path.join('optical_flow', dataset_name), context_frame_num=1, mode=mode, border_mode='hard', file_format='.npy')
+
 
 if not bbox_saved:
-    # Build the object detector from a config file and a checkpoint file.
+    # build the model from a config file and a checkpoint file
     model = init_detector(config_file, checkpoint_file, device='cuda:0')
 
+    collate_func = bbox_collate('test')
+    dataset_loader = DataLoader(dataset=dataset, batch_size=1, shuffle=False, num_workers=1, collate_fn=collate_func.collate)
     all_bboxes = list()
+
     for idx in range(dataset.__len__()):
         batch, _ = dataset.__getitem__(idx)
-        print('Extracting bboxes of {}-th frame'.format(idx + 1))
+        batch2, _ = dataset2.__getitem__(idx)
+        print('Extracting bboxes of {}-th frame in total {} frames'.format(idx + 1, dataset.__len__()))
         cur_img = img_tensor2numpy(batch[1])
+        cur_of = img_tensor2numpy(batch2[1])
 
-        if foreground_extraction_mode == 'obj_det_with_motion':
-            # A coarse detection of bboxes by pretrained object detector.
-            ap_bboxes = get_ap_bboxes(cur_img, model, dataset_name, verbose=False)
+        if foreground_extraction_mode == 'obj_det_with_gd':
+            # A coarse detection of bboxes by pretrained object detector
+            ob_bboxes = getObBboxes(cur_img, model, dataset_name, verbose=True)
+            ob_bboxes = delCoverBboxes(ob_bboxes, dataset_name)
 
-            # Delete overlapping appearance based bounding boxes.
-            ap_bboxes = del_cover_bboxes(ap_bboxes, dataset_name)
-            # imshow_bboxes(cur_img, ap_bboxes, win_name='kept ap based bboxes')
+            # imshow_bboxes(cur_img, ob_bboxes, win_name='del_cover_bboxes')
 
-            # Further foreground detection by motion.
-            mt_bboxes = get_mt_bboxes(cur_img, img_batch_tensor2numpy(batch), ap_bboxes, dataset_name, verbose=False)
-            if mt_bboxes.shape[0] > 0:
-                cur_bboxes = np.concatenate((ap_bboxes, mt_bboxes), axis=0)
+            # further foreground detection by gradients
+            gd_bboxes = getGdBboxes(cur_img, img_batch_tensor2numpy(batch), ob_bboxes, dataset_name, verbose=False)
+
+            if gd_bboxes.shape[0] > 0:
+                cur_bboxes = np.concatenate((ob_bboxes, gd_bboxes), axis=0)
             else:
-                cur_bboxes = ap_bboxes
+                cur_bboxes = ob_bboxes
+        elif foreground_extraction_mode == 'obj_det_with_of':
+            # A coarse detection of bboxes by pretrained object detector
+            ob_bboxes = getObBboxes(cur_img, model, dataset_name, verbose=False)
+            ob_bboxes = delCoverBboxes(ob_bboxes, dataset_name)
+
+            # visual object detection bounding boxes with covering filter
+            # imshow_bboxes(cur_img, ob_bboxes, win_name='del_cover_bboxes')
+
+            # further foreground detection by optical flow
+            of_bboxes = getOfBboxes(cur_of, cur_img, ob_bboxes, dataset_name, verbose=False)
+
+            if of_bboxes.shape[0] > 0:
+                cur_bboxes = np.concatenate((ob_bboxes, of_bboxes), axis=0)
+            else:
+                cur_bboxes = ob_bboxes
         elif foreground_extraction_mode == 'obj_det':
-            # A coarse detection of bboxes by pretrained object detector.
-            ap_bboxes = get_ap_bboxes(cur_img, model, dataset_name)
-            cur_bboxes = del_cover_bboxes(ap_bboxes, dataset_name)
+            # A coarse detection of bboxes by pretrained object detector
+            ob_bboxes = getObBboxes(cur_img, model, dataset_name)
+            cur_bboxes = delCoverBboxes(ob_bboxes, dataset_name)
         elif foreground_extraction_mode == 'simple_patch':
             patch_num_list = [(3, 4), (6, 8)]
             cur_bboxes = list()
@@ -89,8 +114,8 @@ if not bbox_saved:
         else:
             raise NotImplementedError
 
-        # imshow_bboxes(cur_img, cur_bboxes, win_name='all foreground bboxes')
         all_bboxes.append(cur_bboxes)
+
     np.save(os.path.join(dataset.dir, 'bboxes_test_{}.npy'.format(foreground_extraction_mode)), all_bboxes)
     print('bboxes for testing data saved!')
 else:
@@ -193,7 +218,7 @@ else:
 #  /*-------------------------------------------------Abnormal event detection-----------------------------------------------------*/
 results_dir = 'results'
 scores_saved = cp.getboolean(dataset_name, 'scores_saved')
-big_number = 100000
+big_number = 20
 if scores_saved is False:
     if method == 'SelfComplete':
         h, w, _, sn = frame_size[dataset_name]
@@ -205,75 +230,83 @@ if scores_saved is False:
             tot_frame_num = 2 * cp.getint(method, 'context_frame_num') + 1
             tot_of_num = 2 * cp.getint(method, 'context_of_num') + 1
         rawRange = cp.getint(method, 'rawRange')
-        if rawRange >= tot_frame_num:  # If rawRange is out of the range, use all frames.
+        if rawRange >= tot_frame_num:
             rawRange = None
         useFlow = cp.getboolean(method, 'useFlow')
         padding = cp.getboolean(method, 'padding')
+        w_mse = cp.getfloat(method, 'w_mse')
+        w_ssim = cp.getfloat(method, 'w_ssim')
+        w_raw = cp.getfloat(method, 'w_raw')
+        w_of = cp.getfloat(method, 'w_of')
 
         assert modality == 'raw2flow'
-        score_func = nn.MSELoss(reduce=False)
-
-        if tot_of_num == 1:
-            network_architecture = SelfCompleteNet4(features_root=cp.getint(method, 'nf'), tot_raw_num=tot_frame_num, tot_of_num=tot_of_num,
-                                                    border_mode=border_mode, rawRange=rawRange, useFlow=useFlow, padding=padding)
-        elif tot_of_num == 5:
-            network_architecture = SelfCompleteNetFull(features_root=cp.getint(method, 'nf'), tot_raw_num=tot_frame_num, tot_of_num=tot_of_num,
-                                                       border_mode=border_mode, rawRange=rawRange, useFlow=useFlow, padding=padding)
-        else:
-            NotImplementedError
-        assert tot_frame_num == 5
+        score_func_mse = nn.MSELoss(reduce=False)
+        score_func_ssim = pytorch_ssim.SSIM(window_size=3, size_average=False)
 
         pixel_result_dir = os.path.join(results_dir, dataset_name, 'score_mask')
-        os.makedirs(pixel_result_dir, exist_ok=True)  # A folder to store frame pixel results.
+        os.makedirs(pixel_result_dir, exist_ok=True)
 
-        # Load saved models.
         model_weights = torch.load(os.path.join(data_root_dir, modality, dataset_name + '_' + 'model_{}_{}.npy'.format(foreground_extraction_mode, method)))
+
         if dataset_name == 'ShanghaiTech':
             model_set = [[[[] for ww in range(len(model_weights[ss][hh]))] for hh in range(len(model_weights[ss]))] for ss in range(len(model_weights))]
             for ss in range(len(model_weights)):
                 for hh in range(len(model_weights[ss])):
                     for ww in range(len(model_weights[ss][hh])):
                         if len(model_weights[ss][hh][ww]) > 0:
-                            cur_model = torch.nn.DataParallel(network_architecture, device_ids=[0]).cuda()
+                            cur_model = LSTM_Unet_Cnm3(features_root=cp.getint(method, 'nf'), tot_raw_num=tot_frame_num,
+                                                       tot_of_num=tot_of_num, border_mode=border_mode, rawRange=rawRange,
+                                                       useFlow=useFlow, padding=padding).cuda()
                             cur_model.load_state_dict(model_weights[ss][hh][ww][0])
                             model_set[ss][hh][ww].append(cur_model.eval())
+            #  get training scores statistics
+            raw_training_scores_set1 = torch.load(os.path.join(data_root_dir, modality, dataset_name + '_' + 'raw_training_scores1_{}_{}.npy'.format(foreground_extraction_mode, method)))
+            of_training_scores_set1 = torch.load(os.path.join(data_root_dir, modality, dataset_name + '_' + 'of_training_scores1_{}_{}.npy'.format(foreground_extraction_mode, method)))
+            raw_training_scores_set2 = torch.load(os.path.join(data_root_dir, modality, dataset_name + '_' + 'raw_training_scores2_{}_{}.npy'.format(foreground_extraction_mode, method)))
+            of_training_scores_set2 = torch.load(os.path.join(data_root_dir, modality, dataset_name + '_' + 'of_training_scores2_{}_{}.npy'.format(foreground_extraction_mode, method)))
 
-            # Get training score statistics.
-            raw_training_scores_set = torch.load(os.path.join(data_root_dir, modality, dataset_name + '_' + 'raw_training_scores_{}_{}.npy'.format(foreground_extraction_mode, method)))
-            of_training_scores_set = torch.load(os.path.join(data_root_dir, modality, dataset_name + '_' + 'of_training_scores_{}_{}.npy'.format(foreground_extraction_mode, method)))
-
-            # Calculate mean and std of training scores.
-            raw_stats_set = [[[(np.mean(raw_training_scores_set[ss][hh][ww]), np.std(raw_training_scores_set[ss][hh][ww])) for ww in range(w_block)] for hh in range(h_block)] for ss in range(len(model_weights))]
+            # mean and std of training scores
+            raw_mse_stats_set = [[[(np.mean(raw_training_scores_set2[ss][hh][ww]), np.std(raw_training_scores_set2[ss][hh][ww])) for ww in range(w_block)] for hh in range(h_block)] for ss in range(len(model_weights))]
+            raw_ssim_stats_set = [[[(np.mean(raw_training_scores_set1[ss][hh][ww]), np.std(raw_training_scores_set1[ss][hh][ww])) for ww in range(w_block)] for hh in range(h_block)] for ss in range(len(model_weights))]
             if useFlow:
-                of_stats_set = [[[(np.mean(of_training_scores_set[ss][hh][ww]), np.std(of_training_scores_set[ss][hh][ww])) for ww in range(w_block)] for hh in range(h_block)] for ss in range(len(model_weights))]
-            del raw_training_scores_set, of_training_scores_set
+                of_ssim_stats_set = [[[(np.mean(of_training_scores_set1[ss][hh][ww]), np.std(of_training_scores_set1[ss][hh][ww])) for ww in range(w_block)] for hh in range(h_block)] for ss in range(len(model_weights))]
+                of_mse_stats_set = [[[(np.mean(of_training_scores_set2[ss][hh][ww]), np.std(of_training_scores_set2[ss][hh][ww])) for ww in range(w_block)] for hh in range(h_block)] for ss in range(len(model_weights))]
+            del raw_training_scores_set1, of_training_scores_set1, raw_training_scores_set2, of_training_scores_set2
         else:
             model_set = [[[] for ww in range(len(model_weights[hh]))] for hh in range(len(model_weights))]
             for hh in range(len(model_weights)):
                 for ww in range(len(model_weights[hh])):
                     if len(model_weights[hh][ww]) > 0:
-                        cur_model = torch.nn.DataParallel(network_architecture, device_ids=[0]).cuda()
+                        cur_model = LSTM_Unet_Cnm3(features_root=cp.getint(method, 'nf'), tot_raw_num=tot_frame_num,
+                                                   tot_of_num=tot_of_num, border_mode=border_mode, rawRange=rawRange,
+                                                   useFlow=useFlow, padding=padding, m=1).cuda()  # single GPU: faster
                         cur_model.load_state_dict(model_weights[hh][ww][0])
                         model_set[hh][ww].append(cur_model.eval())
 
-            # Get training score statistics.
-            raw_training_scores_set = torch.load(os.path.join(data_root_dir, modality, dataset_name + '_' + 'raw_training_scores_{}_{}.npy'.format(foreground_extraction_mode, method)))
-            of_training_scores_set = torch.load(os.path.join(data_root_dir, modality, dataset_name + '_' + 'of_training_scores_{}_{}.npy'.format(foreground_extraction_mode, method)))
-            
-            # Calculate mean and std of training scores.
-            raw_stats_set = [[(np.mean(raw_training_scores_set[hh][ww]), np.std(raw_training_scores_set[hh][ww])) for ww in range(len(model_weights[hh]))] for hh in range(len(model_weights))]
-            if useFlow:
-                of_stats_set = [[(np.mean(of_training_scores_set[hh][ww]), np.std(of_training_scores_set[hh][ww])) for ww in range(len(model_weights[hh]))] for hh in range(len(model_weights))]
-            del raw_training_scores_set, of_training_scores_set
+            #  get training scores statistics
+            raw_training_scores_set1 = torch.load(os.path.join(data_root_dir, modality, dataset_name + '_' + 'raw_training_scores1_{}_{}.npy'.format(foreground_extraction_mode, method)))
+            of_training_scores_set1 = torch.load(os.path.join(data_root_dir, modality, dataset_name + '_' + 'of_training_scores1_{}_{}.npy'.format(foreground_extraction_mode, method)))
+            raw_training_scores_set2 = torch.load(os.path.join(data_root_dir, modality, dataset_name + '_' + 'raw_training_scores2_{}_{}.npy'.format(foreground_extraction_mode, method)))
+            of_training_scores_set2 = torch.load(os.path.join(data_root_dir, modality, dataset_name + '_' + 'of_training_scores2_{}_{}.npy'.format(foreground_extraction_mode, method)))
 
-        # Calculate anomaly scores for each video event (frame).
+            # mean and std of training scores
+            raw_ssim_stats_set = [[(np.mean(raw_training_scores_set1[hh][ww]), np.std(raw_training_scores_set1[hh][ww])) for ww in range(len(model_weights[hh]))] for hh in range(len(model_weights))]
+            raw_mse_stats_set = [[(np.mean(raw_training_scores_set2[hh][ww]), np.std(raw_training_scores_set2[hh][ww])) for ww in range(len(model_weights[hh]))] for hh in range(len(model_weights))]
+            if useFlow:
+                of_ssim_stats_set = [[(np.mean(of_training_scores_set1[hh][ww]), np.std(of_training_scores_set1[hh][ww])) for ww in range(len(model_weights[hh]))] for hh in range(len(model_weights))]
+                of_mse_stats_set = [[(np.mean(of_training_scores_set2[hh][ww]), np.std(of_training_scores_set2[hh][ww])) for ww in range(len(model_weights[hh]))] for hh in range(len(model_weights))]
+
+            del raw_training_scores_set1, of_training_scores_set1, raw_training_scores_set2, of_training_scores_set2
+
+        # Get scores
         for frame_idx in range(len(foreground_set)):
-            print('Calculating scores for {}-th frame'.format(frame_idx))
+            print('Calculating scores for {}-th frame in total {} frames'.format(frame_idx, len(foreground_set)))
             cur_data_set = foreground_set[frame_idx]
             cur_data_set2 = foreground_set2[frame_idx]
             cur_bboxes = foreground_bbox_set[frame_idx]
-            # Normal: no objects in this block.
+            # normal: no objects in test set
             cur_pixel_results = -1 * np.ones(shape=(h, w)) * big_number
+
             for h_idx in range(len(cur_data_set)):
                 for w_idx in range(len(cur_data_set[h_idx])):
                     if len(cur_data_set[h_idx][w_idx]) > 0:
@@ -282,43 +315,16 @@ if scores_saved is False:
                             if len(model_set[scene_idx[frame_idx] - 1][h_idx][w_idx]) > 0:
                                 cur_model = model_set[scene_idx[frame_idx] - 1][h_idx][w_idx][0]
                                 cur_dataset = cube_to_train_dataset(cur_data_set[h_idx][w_idx], target=cur_data_set2[h_idx][w_idx])
-                                cur_dataloader = DataLoader(dataset=cur_dataset, batch_size=cur_data_set[h_idx][w_idx].shape[0], shuffle=False)
+                                cur_dataloader = DataLoader(dataset=cur_dataset, batch_size=cur_data_set[h_idx][w_idx].shape[0], shuffle=False, num_workers=0)
                                 for idx, (inputs, of_targets_all, _) in enumerate(cur_dataloader):
                                     inputs = inputs.cuda().type(torch.cuda.FloatTensor)
                                     of_targets_all = of_targets_all.cuda().type(torch.cuda.FloatTensor)
-                                    
+
+                                    inputs = inputs.view(inputs.size(0), tot_frame_num, -1, inputs.size(2), inputs.size(3))
+                                    of_targets_all = of_targets_all.view(of_targets_all.size(0), tot_of_num, -1, of_targets_all.size(2), of_targets_all.size(3))
+
                                     of_outputs, raw_outputs, of_targets, raw_targets = cur_model(inputs, of_targets_all)
-
-                                    if useFlow:
-                                        of_scores = score_func(of_targets, of_outputs).cpu().data.numpy()
-                                        of_scores = np.sum(np.sum(np.sum(of_scores, axis=3), axis=2), axis=1)  # MSE score.
-
-                                    raw_scores = score_func(raw_targets, raw_outputs).cpu().data.numpy()
-                                    raw_scores = np.sum(np.sum(np.sum(raw_scores, axis=3), axis=2), axis=1)  # MSE score.
-
-                                    # Normalize scores using training scores.
-                                    raw_scores = (raw_scores - raw_stats_set[scene_idx[frame_idx] - 1][h_idx][w_idx][0]) / raw_stats_set[scene_idx[frame_idx] - 1][h_idx][w_idx][1]
-                                    if useFlow:
-                                        of_scores = (of_scores - of_stats_set[scene_idx[frame_idx] - 1][h_idx][w_idx][0]) / of_stats_set[scene_idx[frame_idx] - 1][h_idx][w_idx][1]
-
-                                    if useFlow:
-                                        scores = cp.getfloat(method, 'w_raw') * raw_scores + cp.getfloat(method, 'w_of') * of_scores
-                                    else:
-                                        scores = cp.getfloat(method, 'w_raw') * raw_scores
-                            else:
-                                # Anomaly: No object in training set while objects occur in this block.
-                                scores = np.ones(cur_data_set[h_idx][w_idx].shape[0], ) * big_number
-                        else:
-                            if len(model_set[h_idx][w_idx]) > 0:
-                                cur_model = model_set[h_idx][w_idx][0]
-                                cur_dataset = cube_to_train_dataset(cur_data_set[h_idx][w_idx], target=cur_data_set2[h_idx][w_idx])
-                                cur_dataloader = DataLoader(dataset=cur_dataset, batch_size=cur_data_set[h_idx][w_idx].shape[0], shuffle=False)
-                                for idx, (inputs, of_targets_all, _) in enumerate(cur_dataloader):
-                                    inputs = inputs.cuda().type(torch.cuda.FloatTensor)
-                                    of_targets_all = of_targets_all.cuda().type(torch.cuda.FloatTensor)
-                                    of_outputs, raw_outputs, of_targets, raw_targets = cur_model(inputs, of_targets_all)
-                                    
-                                    # Visualization.
+                                    # visualization
                                     # max_num = 30
                                     # visualize_pair_map(
                                     #     batch_1=img_batch_tensor2numpy(raw_targets.cpu().detach()[:max_num, 6:9, :, :]),
@@ -328,23 +334,84 @@ if scores_saved is False:
                                     #     batch_2=img_batch_tensor2numpy(of_outputs.cpu().detach()[:max_num, 4:6, :, :]))
 
                                     if useFlow:
-                                        of_scores = score_func(of_targets, of_outputs).cpu().data.numpy()
-                                        of_scores = np.sum(np.sum(np.sum(of_scores, axis=3), axis=2), axis=1)  # MSE score.
+                                        of_scores_mse = score_func_mse(of_targets, of_outputs).cpu().data.numpy()
+                                        of_scores_mse = np.sum(np.sum(np.sum(of_scores_mse, axis=3), axis=2), axis=1)
+                                        of_scores_ssim = 1 - score_func_ssim(of_targets, of_outputs).cpu().data.numpy()
 
-                                    raw_scores = score_func(raw_targets, raw_outputs).cpu().data.numpy()
-                                    raw_scores = np.sum(np.sum(np.sum(raw_scores, axis=3), axis=2), axis=1)  # MSE score.
-                                        
-                                    # Normalize scores using training scores.
-                                    raw_scores = (raw_scores - raw_stats_set[h_idx][w_idx][0]) / raw_stats_set[h_idx][w_idx][1]
+                                    raw_scores_mse = score_func_mse(raw_targets, raw_outputs).cpu().data.numpy()
+                                    raw_scores_mse = np.sum(np.sum(np.sum(raw_scores_mse, axis=3), axis=2), axis=1)
+                                    raw_scores_ssim = 1 - score_func_ssim(raw_targets, raw_outputs).cpu().data.numpy()
+
+                                    raw_scores_mse = (raw_scores_mse - raw_mse_stats_set[scene_idx[frame_idx] - 1][h_idx][w_idx][0]) / \
+                                                     raw_mse_stats_set[scene_idx[frame_idx] - 1][h_idx][w_idx][1]
+                                    raw_scores_ssim = (raw_scores_ssim - raw_ssim_stats_set[scene_idx[frame_idx] - 1][h_idx][w_idx][0]) / \
+                                                      raw_ssim_stats_set[scene_idx[frame_idx] - 1][h_idx][w_idx][1]
                                     if useFlow:
-                                        of_scores = (of_scores - of_stats_set[h_idx][w_idx][0]) / of_stats_set[h_idx][w_idx][1]
-                                        
+                                        of_scores_ssim = (of_scores_ssim - of_ssim_stats_set[scene_idx[frame_idx] - 1][h_idx][w_idx][0]) / \
+                                                         of_ssim_stats_set[scene_idx[frame_idx] - 1][h_idx][w_idx][1]
+                                        of_scores_mse = (of_scores_mse - of_mse_stats_set[scene_idx[frame_idx] - 1][h_idx][w_idx][0]) / \
+                                                        of_mse_stats_set[scene_idx[frame_idx] - 1][h_idx][w_idx][1]
+
+                                    raw_scores = w_ssim * raw_scores_ssim + w_mse * raw_scores_mse
+                                    of_scores = w_ssim * of_scores_ssim + w_mse * of_scores_mse
+
                                     if useFlow:
-                                        scores = cp.getfloat(method, 'w_raw') * raw_scores + cp.getfloat(method, 'w_of') * of_scores
+                                        scores = w_raw * raw_scores + w_of * of_scores
                                     else:
-                                        scores = cp.getfloat(method, 'w_raw') * raw_scores   
+                                        scores = raw_scores
+
                             else:
-                                # Anomaly: No object in training set while objects occur in this block.
+                                scores = np.ones(cur_data_set[h_idx][w_idx].shape[0], ) * big_number
+                        else:
+                            if len(model_set[h_idx][w_idx]) > 0:
+                                cur_model = model_set[h_idx][w_idx][0]
+                                cur_dataset = cube_to_train_dataset(cur_data_set[h_idx][w_idx], target=cur_data_set2[h_idx][w_idx])
+                                cur_dataloader = DataLoader(dataset=cur_dataset, batch_size=cur_data_set[h_idx][w_idx].shape[0], shuffle=False)
+
+                                for idx, (inputs, of_targets_all, _) in enumerate(cur_dataloader):
+                                    inputs = inputs.cuda().type(torch.cuda.FloatTensor)
+                                    of_targets_all = of_targets_all.cuda().type(torch.cuda.FloatTensor)
+
+                                    inputs = inputs.view(inputs.size(0), tot_frame_num, -1, inputs.size(2), inputs.size(3))
+                                    of_targets_all = of_targets_all.view(of_targets_all.size(0), tot_of_num, -1, of_targets_all.size(2), of_targets_all.size(3))
+
+                                    of_outputs, raw_outputs, of_targets, raw_targets = cur_model(inputs, of_targets_all)
+
+                                    # visualization
+                                    # max_num = 30
+                                    # visualize_pair_map(
+                                    #     batch_1=img_batch_tensor2numpy(raw_targets.cpu().detach()[:max_num, 6:9, :, :]),
+                                    #     batch_2=img_batch_tensor2numpy(raw_outputs.cpu().detach()[:max_num, 6:9, :, :]))
+                                    # visualize_pair(
+                                    #     batch_1=img_batch_tensor2numpy(of_targets.cpu().detach()[:max_num, 4:6, :, :]),
+                                    #     batch_2=img_batch_tensor2numpy(of_outputs.cpu().detach()[:max_num, 4:6, :, :]))
+
+                                    # mse
+                                    if useFlow:
+                                        of_scores_mse = score_func_mse(of_targets, of_outputs).cpu().data.numpy()
+                                        of_scores_mse = np.sum(np.sum(np.sum(of_scores_mse, axis=3), axis=2), axis=1)
+                                        of_scores_ssim = 1 - score_func_ssim(of_targets, of_outputs).cpu().data.numpy()
+
+                                    raw_scores_mse = score_func_mse(raw_targets, raw_outputs).cpu().data.numpy()
+                                    raw_scores_mse = np.sum(np.sum(np.sum(raw_scores_mse, axis=3), axis=2), axis=1)
+                                    raw_scores_ssim = 1 - score_func_ssim(raw_targets, raw_outputs).cpu().data.numpy()
+
+                                    # normalize scores using training scores
+                                    raw_scores_mse = (raw_scores_mse - raw_mse_stats_set[h_idx][w_idx][0]) / raw_mse_stats_set[h_idx][w_idx][1]
+                                    raw_scores_ssim = (raw_scores_ssim - raw_ssim_stats_set[h_idx][w_idx][0]) / raw_ssim_stats_set[h_idx][w_idx][1]
+                                    if useFlow:
+                                        of_scores_mse = (of_scores_mse - of_mse_stats_set[h_idx][w_idx][0]) / of_mse_stats_set[h_idx][w_idx][1]
+                                        of_scores_ssim = (of_scores_ssim - of_ssim_stats_set[h_idx][w_idx][0]) / of_ssim_stats_set[h_idx][w_idx][1]
+
+                                    raw_scores = w_ssim * raw_scores_ssim + w_mse * raw_scores_mse
+                                    of_scores = w_ssim * of_scores_ssim + w_mse * of_scores_mse
+
+                                    if useFlow:
+                                        scores = w_raw * raw_scores + w_of * of_scores
+                                    else:
+                                        scores = raw_scores
+                            else:
+                                # anomaly: no objects in training set while objects occur in this block
                                 scores = np.ones(cur_data_set[h_idx][w_idx].shape[0], ) * big_number
 
                         for m in range(scores.shape[0]):
@@ -355,16 +422,26 @@ if scores_saved is False:
                             y_min, y_max = np.int(np.ceil(bbox[1])), np.int(np.ceil(bbox[3]))
                             cur_score_mask[y_min:y_max, x_min:x_max] = cur_score
                             cur_pixel_results = np.max(np.concatenate([cur_pixel_results[:, :, np.newaxis], cur_score_mask[:, :, np.newaxis]], axis=2), axis=2)
-            torch.save(cur_pixel_results, os.path.join(pixel_result_dir, '{}'.format(frame_idx))) 
+            torch.save(cur_pixel_results, os.path.join(pixel_result_dir, '{}'.format(frame_idx)))
     else:
         raise NotImplementedError
 
 #  /*-------------------------------------------------------Evaluation-----------------------------------------------------------*/
 criterion = 'frame'
 batch_size = 1
-# Set dataset for evaluation.
+# set dataset for evaluation
 dataset = unified_dataset_interface(dataset_name=dataset_name, dir=os.path.join(raw_dataset_dir, dataset_name), context_frame_num=0, mode=mode, border_mode='hard')
-dataset_loader = DataLoader(dataset=dataset, batch_size=batch_size, shuffle=False, num_workers=1, collate_fn=bbox_collate(mode).collate)
+dataset_loader = DataLoader(dataset=dataset, batch_size=batch_size, shuffle=False, num_workers=8, collate_fn=bbox_collate(mode).collate)
+
+
+def moving_average(values, window_size, decay):
+    # window_size >= 1 0<decay<=1
+    window = np.logspace(0, window_size-1, window_size, base=decay)
+    window = window / np.sum(window)
+    # print(window)
+
+    return np.convolve(values, window, 'same')
+
 
 print('Evaluating {} by {}-criterion:'.format(dataset_name, criterion))
 if criterion == 'frame':
@@ -379,8 +456,11 @@ if criterion == 'frame':
         all_frame_scores = [np.array(all_frame_scores[si]) for si in range(dataset.scene_num)]
         all_targets = [np.array(all_targets[si]) for si in range(dataset.scene_num)]
         all_targets = [all_targets[si] > 0 for si in range(dataset.scene_num)]
-        results = [save_roc_pr_curve_data(all_frame_scores[si], all_targets[si], os.path.join(results_dir, dataset_name,
-                   '{}_{}_{}_frame_results_scene_{}.npz'.format(modality, foreground_extraction_mode, method, si + 1))) for si in range(dataset.scene_num)]
+
+        # moving average
+        all_frame_scores = [moving_average(all_frame_scores[si], window_size=1, decay=1) for si in range(dataset.scene_num)]
+
+        results = [save_roc_pr_curve_data(all_frame_scores[si], all_targets[si], os.path.join(results_dir, dataset_name, '{}_{}_{}_frame_results_scene_{}.npz'.format(modality, foreground_extraction_mode, method, si + 1))) for si in range(dataset.scene_num)]
         results = np.array(results).mean()
         print('Average frame-level AUC is {}'.format(results))
     else:
@@ -391,12 +471,16 @@ if criterion == 'frame':
             cur_pixel_results = torch.load(os.path.join(results_dir, dataset_name, 'score_mask', '{}'.format(idx)))
             all_frame_scores.append(cur_pixel_results.max())
             all_targets.append(target[0].numpy().max())
-        all_frame_scores = np.array(all_frame_scores)                   
+        all_frame_scores = np.array(all_frame_scores)
         all_targets = np.array(all_targets)
         all_targets = all_targets > 0
         results_path = os.path.join(results_dir, dataset_name, '{}_{}_{}_frame_results.npz'.format(modality, foreground_extraction_mode, method))
         print('Results written to {}:'.format(results_path))
+
+        # moving average
+        all_frame_scores = moving_average(all_frame_scores, window_size=1, decay=1)
         auc = save_roc_pr_curve_data(all_frame_scores, all_targets, results_path)
+
 elif criterion == 'pixel':
     if dataset_name != 'ShanghaiTech':
         all_pixel_scores = list()
@@ -411,7 +495,7 @@ elif criterion == 'pixel':
                 cur_effective_scores = cur_pixel_results[target_mask > 0]
                 sorted_score = np.sort(cur_effective_scores)
                 cut_off_idx = np.int(np.round((1 - thr) * cur_effective_scores.shape[0]))
-                cut_off_score = cur_effective_scores[cut_off_idx]
+                cut_off_score = sorted_score[cut_off_idx]
             else:
                 cut_off_score = cur_pixel_results.max()
             all_pixel_scores.append(cut_off_score)

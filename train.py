@@ -4,24 +4,28 @@ from torch.utils.data import DataLoader
 from vad_datasets import unified_dataset_interface, cube_to_train_dataset
 from fore_det.inference import init_detector
 from vad_datasets import bbox_collate, img_tensor2numpy, img_batch_tensor2numpy, frame_size
-from fore_det.obj_det_with_motion import imshow_bboxes, get_ap_bboxes, get_mt_bboxes, del_cover_bboxes
+from fore_det.obj_det_with_motion import imshow_bboxes, getObBboxes, getGdBboxes, getOfBboxes, delCoverBboxes
 from fore_det.simple_patch import get_patch_loc
 import cv2
 from helper.misc import AverageMeter
 import torch
-from model.unet import SelfCompleteNet4, SelfCompleteNetFull, SelfCompleteNet1raw1of
+from model.unet import SelfCompleteNetCnm
+from model.rnn_unet import LSTM_Unet_Cnm3
 import torch.optim as optim
 import torch.nn as nn
 from configparser import ConfigParser
+from helper.visualization_helper import visualize_pair, visualize_batch, visualize_pair_map
+import pytorch_ssim
 from utils import calc_block_idx
+
 
 #  /*-------------------------------------------------Overall parameter setting-----------------------------------------------------*/
 cp = ConfigParser()
 cp.read("config.cfg")
 
-dataset_name = cp.get('shared_parameters', 'dataset_name')  # The name of dataset: UCSDped2/avenue/ShanghaiTech.
+dataset_name = cp.get('shared_parameters', 'dataset_name')  # The name of dataset.
 raw_dataset_dir = cp.get('shared_parameters', 'raw_dataset_dir')  # Fixed
-foreground_extraction_mode = cp.get('shared_parameters', 'foreground_extraction_mode')  # Foreground extraction method: obj_det_with_motion/obj_det/simple_patch/frame.
+foreground_extraction_mode = cp.get('shared_parameters', 'foreground_extraction_mode')
 data_root_dir = cp.get('shared_parameters', 'data_root_dir')  # Fixed: A folder that stores the data such as foreground produced by the program.
 modality = cp.get('shared_parameters', 'modality')  # Fixed
 mode = cp.get('train_parameters', 'mode')  # Fixed
@@ -46,8 +50,10 @@ config_file = 'fore_det/obj_det_config/cascade_rcnn_r101_fpn_1x.py'
 checkpoint_file = 'fore_det/obj_det_checkpoints/cascade_rcnn_r101_fpn_1x_20181129-d64ebac7.pth'
 
 # Set dataset for foreground localization.
-dataset = unified_dataset_interface(dataset_name=dataset_name, dir=os.path.join(raw_dataset_dir, dataset_name),
-                                    context_frame_num=1, mode=mode, border_mode='hard')
+# raw dataset
+dataset = unified_dataset_interface(dataset_name=dataset_name, dir=os.path.join('raw_datasets', dataset_name), context_frame_num=1, mode=mode, border_mode='hard')
+# optical flow dataset
+dataset2 = unified_dataset_interface(dataset_name=dataset_name, dir=os.path.join('optical_flow', dataset_name), context_frame_num=1, mode=mode, border_mode='hard', file_format='.npy')
 
 if not bbox_saved:
     # Build the object detector from a config file and a checkpoint file.
@@ -56,28 +62,44 @@ if not bbox_saved:
     all_bboxes = list()
     for idx in range(dataset.__len__()):
         batch, _ = dataset.__getitem__(idx)
+        batch2, _ = dataset2.__getitem__(idx)
         print('Extracting bboxes of {}-th frame'.format(idx + 1))
         cur_img = img_tensor2numpy(batch[1])
+        cur_of = img_tensor2numpy(batch2[1])
 
-        if foreground_extraction_mode == 'obj_det_with_motion':
-            # A coarse detection of bboxes by pretrained object detector.
-            ap_bboxes = get_ap_bboxes(cur_img, model, dataset_name, verbose=False)
+        if foreground_extraction_mode == 'obj_det_with_gd':
+            # A coarse detection of bboxes by pretrained object detector
+            ob_bboxes = getObBboxes(cur_img, model, dataset_name, verbose=False)
+            ob_bboxes = delCoverBboxes(ob_bboxes, dataset_name)
 
-            # Delete overlapping appearance based bounding boxes.
-            ap_bboxes = del_cover_bboxes(ap_bboxes, dataset_name)
-            # imshow_bboxes(cur_img, ap_bboxes, win_name='kept ap based bboxes')
+            # imshow_bboxes(cur_img, ob_bboxes, win_name='del_cover_bboxes')
 
-            # Further foreground detection by motion.
-            mt_bboxes = get_mt_bboxes(cur_img, img_batch_tensor2numpy(batch), ap_bboxes, dataset_name, verbose=False)
+            # further foreground detection by gradients
+            gd_bboxes = getGdBboxes(cur_img, img_batch_tensor2numpy(batch), ob_bboxes, dataset_name, verbose=False)
 
-            if mt_bboxes.shape[0] > 0:
-                cur_bboxes = np.concatenate((ap_bboxes, mt_bboxes), axis=0)
+            if gd_bboxes.shape[0] > 0:
+                cur_bboxes = np.concatenate((ob_bboxes, gd_bboxes), axis=0)
             else:
-                cur_bboxes = ap_bboxes
+                cur_bboxes = ob_bboxes
+        elif foreground_extraction_mode == 'obj_det_with_of':
+            # A coarse detection of bboxes by pretrained object detector
+            ob_bboxes = getObBboxes(cur_img, model, dataset_name, verbose=True)
+            ob_bboxes = delCoverBboxes(ob_bboxes, dataset_name)
+
+            # visual object detection bounding boxes with covering filter
+            # imshow_bboxes(cur_img, ob_bboxes, win_name='del_cover_bboxes')
+
+            # further foreground detection by optical flow
+            of_bboxes = getOfBboxes(cur_of, cur_img, ob_bboxes, dataset_name, verbose=True)
+
+            if of_bboxes.shape[0] > 0:
+                cur_bboxes = np.concatenate((ob_bboxes, of_bboxes), axis=0)
+            else:
+                cur_bboxes = ob_bboxes
         elif foreground_extraction_mode == 'obj_det':
             # A coarse detection of bboxes by pretrained object detector
-            ap_bboxes = get_ap_bboxes(cur_img, model, dataset_name)
-            cur_bboxes = del_cover_bboxes(ap_bboxes, dataset_name)
+            ob_bboxes = getObBboxes(cur_img, model, dataset_name)
+            cur_bboxes = delCoverBboxes(ob_bboxes, dataset_name)
         elif foreground_extraction_mode == 'simple_patch':
             patch_num_list = [(3, 4), (6, 8)]
             cur_bboxes = list()
@@ -85,7 +107,7 @@ if not bbox_saved:
                 cur_bboxes.append(get_patch_loc(frame_size[dataset_name][0], frame_size[dataset_name][1], h_num, w_num))
             cur_bboxes = np.concatenate(cur_bboxes, axis=0)
         elif foreground_extraction_mode == 'frame':
-            cur_bboxes = list()
+            cur_bboxes = []
             cur_bboxes.append([0, 0, cur_img.shape[1], cur_img.shape[0]])
             cur_bboxes = np.array(cur_bboxes)
         else:
@@ -239,6 +261,9 @@ else:
 #  /*-----------------------------------------------Normal video event modeling---------------------------------------------------*/
 if method == 'SelfComplete':
     loss_func = nn.MSELoss()
+    score_func_mse = nn.MSELoss(reduce=False)
+    score_func_ssim = pytorch_ssim.SSIM(window_size=3, size_average=False)
+
     epochs = cp.getint(method, 'epochs')
     batch_size = cp.getint(method, 'batch_size')
     useFlow = cp.getboolean(method, 'useFlow')
@@ -250,31 +275,25 @@ if method == 'SelfComplete':
         tot_frame_num = 2 * cp.getint(method, 'context_frame_num') + 1
         tot_of_num = 2 * cp.getint(method, 'context_of_num') + 1
     rawRange = cp.getint(method, 'rawRange')
-    if rawRange >= tot_frame_num:  # If rawRange is out of the range, use all frames.
+    if rawRange >= tot_frame_num:  # if rawRange is out of the range, use all frames
         rawRange = None
     padding = cp.getboolean(method, 'padding')
     lambda_raw = cp.getfloat(method, 'lambda_raw')
     lambda_of = cp.getfloat(method, 'lambda_of')
+
     assert modality == 'raw2flow'
-
-    if tot_of_num == 1:
-        network_architecture = SelfCompleteNet4(features_root=cp.getint(method, 'nf'), tot_raw_num=tot_frame_num, tot_of_num=tot_of_num,
-                                                border_mode=border_mode, rawRange=rawRange, useFlow=useFlow, padding=padding)
-    elif tot_of_num == 5:
-        network_architecture = SelfCompleteNetFull(features_root=cp.getint(method, 'nf'), tot_raw_num=tot_frame_num, tot_of_num=tot_of_num,
-                                                   border_mode=border_mode, rawRange=rawRange, useFlow=useFlow, padding=padding)
-    else:
-        NotImplementedError
-    assert tot_frame_num == 5
-
     if dataset_name == 'ShanghaiTech':
         model_set = [[[[] for ww in range(w_block)] for hh in range(h_block)] for ss in range(frame_size[dataset_name][-1])]
-        raw_training_scores_set = [[[[] for ww in range(w_block)] for hh in range(h_block)] for ss in range(frame_size[dataset_name][-1])]
-        of_training_scores_set = [[[[] for ww in range(w_block)] for hh in range(h_block)] for ss in range(frame_size[dataset_name][-1])]
+        raw_training_scores_set1 = [[[[] for ww in range(w_block)] for hh in range(h_block)] for ss in range(frame_size[dataset_name][-1])]
+        of_training_scores_set1 = [[[[] for ww in range(w_block)] for hh in range(h_block)] for ss in range(frame_size[dataset_name][-1])]
+        raw_training_scores_set2 = [[[[] for ww in range(w_block)] for hh in range(h_block)] for ss in range(frame_size[dataset_name][-1])]
+        of_training_scores_set2 = [[[[] for ww in range(w_block)] for hh in range(h_block)] for ss in range(frame_size[dataset_name][-1])]
     else:
         model_set = [[[] for ww in range(len(foreground_set[hh]))] for hh in range(len(foreground_set))]
-        raw_training_scores_set = [[[] for ww in range(len(foreground_set[hh]))] for hh in range(len(foreground_set))]
-        of_training_scores_set = [[[] for ww in range(len(foreground_set[hh]))] for hh in range(len(foreground_set))]
+        raw_training_scores_set1 = [[[] for ww in range(len(foreground_set[hh]))] for hh in range(len(foreground_set))]
+        of_training_scores_set1 = [[[] for ww in range(len(foreground_set[hh]))] for hh in range(len(foreground_set))]
+        raw_training_scores_set2 = [[[] for ww in range(len(foreground_set[hh]))] for hh in range(len(foreground_set))]
+        of_training_scores_set2 = [[[] for ww in range(len(foreground_set[hh]))] for hh in range(len(foreground_set))]
 
     # Prepare training data in current block
     if dataset_name == 'ShanghaiTech':
@@ -285,22 +304,32 @@ if method == 'SelfComplete':
                 for w_idx in range(len(model_set[s_idx][h_idx])):
                     raw_losses = AverageMeter()
                     of_losses = AverageMeter()
-                    # Prepare UNet model and training parameters for current block
-                    cur_model = torch.nn.DataParallel(network_architecture).cuda()
-                    optimizer = optim.Adam(cur_model.parameters(), eps=1e-7, weight_decay=0.000)
+                    # Prepare model and training parameters for current block
+                    cur_model = torch.nn.DataParallel(LSTM_Unet_Cnm3(features_root=cp.getint(method, 'nf'), tot_raw_num=tot_frame_num,
+                                                                     tot_of_num=tot_of_num, border_mode=border_mode, rawRange=rawRange,
+                                                                     useFlow=useFlow, padding=padding)).cuda()
+                    optimizer = optim.Adam(cur_model.parameters(), eps=1e-7, weight_decay=0.0, lr=0.002)
                     cur_model.train()
                     for epoch in range(epochs):
                         for segIdx in range(totSegNum):
-                            foreground_set = np.load(os.path.join(data_root_dir, modality, dataset_name + '_' + 'foreground_train_{}_seg_{}-raw.npy'.format(foreground_extraction_mode, segIdx)), allow_pickle=True)
-                            foreground_set2 = np.load(os.path.join(data_root_dir, modality, dataset_name + '_' + 'foreground_train_{}_seg_{}-flow.npy'.format(foreground_extraction_mode, segIdx)), allow_pickle=True)
+                            foreground_set = np.load(
+                                os.path.join(data_root_dir, modality, dataset_name + '_' + 'foreground_train_{}_seg_{}-raw.npy'.format(foreground_extraction_mode, segIdx)),
+                                allow_pickle=True)
+                            # fix bug
+                            foreground_set2 = np.load(
+                                os.path.join(data_root_dir, modality, dataset_name + '_' + 'foreground_train_{}_seg_{}-flow.npy'.format(foreground_extraction_mode, segIdx)),
+                                allow_pickle=True)
                             cur_training_data = foreground_set[s_idx][h_idx][w_idx]
                             cur_training_data2 = foreground_set2[s_idx][h_idx][w_idx]
                             cur_dataset = cube_to_train_dataset(cur_training_data, target=cur_training_data2)
-                            cur_dataloader = DataLoader(dataset=cur_dataset, batch_size=batch_size, shuffle=True)
+                            cur_dataloader = DataLoader(dataset=cur_dataset, batch_size=batch_size, shuffle=True, num_workers=8)
 
                             for idx, (inputs, of_targets_all, _) in enumerate(cur_dataloader):
                                 inputs = inputs.cuda().type(torch.cuda.FloatTensor)
                                 of_targets_all = of_targets_all.cuda().type(torch.cuda.FloatTensor)
+
+                                inputs = inputs.view(inputs.size(0), tot_frame_num, -1, inputs.size(2), inputs.size(3))
+                                of_targets_all = of_targets_all.view(of_targets_all.size(0), tot_of_num, -1, of_targets_all.size(2), of_targets_all.size(3))
 
                                 of_outputs, raw_outputs, of_targets, raw_targets = cur_model(inputs, of_targets_all)
 
@@ -325,62 +354,91 @@ if method == 'SelfComplete':
 
                                 if idx % 5 == 0:
                                     print('Block: ({}, {}), epoch {}, seg {}, batch {} of {}, raw loss: {}, of loss: {}'.format(
-                                        h_idx, w_idx, epoch, segIdx, idx, cur_dataset.__len__() // batch_size, raw_losses.avg,
-                                        of_losses.avg))
+                                        h_idx, w_idx, epoch, segIdx, idx, cur_dataset.__len__() // batch_size, raw_losses.avg, of_losses.avg))
 
-                    model_set[s_idx][h_idx][w_idx].append(cur_model.state_dict())
+                    model_set[s_idx][h_idx][w_idx].append(cur_model.module.state_dict())
 
-                    # A forward pass to store the training scores of optical flow and raw datasets respectively.
+                    #  /*--  A forward pass to store the training scores of optical flow and raw datasets respectively*/
                     for segIdx in range(totSegNum):
-                        foreground_set = np.load(os.path.join(data_root_dir, modality, dataset_name + '_' + 'foreground_train_{}_seg_{}-raw.npy'.format(foreground_extraction_mode, segIdx)))
-                        foreground_set2 = np.load(os.path.join(data_root_dir, modality, dataset_name + '_' + 'foreground_train_{}_seg_{}-flow.npy'.format(foreground_extraction_mode, segIdx)))
+                        foreground_set = np.load(
+                            os.path.join(data_root_dir, modality, dataset_name + '_' + 'foreground_train_{}_seg_{}-raw.npy'.format(foreground_extraction_mode, segIdx)),
+                            allow_pickle=True)
+                        foreground_set2 = np.load(
+                            os.path.join(data_root_dir, modality, dataset_name + '_' + 'foreground_train_{}_seg_{}-flow.npy'.format(foreground_extraction_mode, segIdx)),
+                            allow_pickle=True)
                         cur_training_data = foreground_set[s_idx][h_idx][w_idx]
                         cur_training_data2 = foreground_set2[s_idx][h_idx][w_idx]
                         cur_dataset = cube_to_train_dataset(cur_training_data, target=cur_training_data2)
 
-                        forward_dataloader = DataLoader(dataset=cur_dataset, batch_size=batch_size, shuffle=False)
-                        score_func = nn.MSELoss(reduce=False)
+                        forward_dataloader = DataLoader(dataset=cur_dataset, batch_size=batch_size // 4, shuffle=False, num_workers=8)
                         cur_model.eval()
                         for idx, (inputs, of_targets_all, _) in enumerate(forward_dataloader):
                             inputs = inputs.cuda().type(torch.cuda.FloatTensor)
                             of_targets_all = of_targets_all.cuda().type(torch.cuda.FloatTensor)
 
+                            inputs = inputs.view(inputs.size(0), tot_frame_num, -1, inputs.size(2), inputs.size(3))
+                            of_targets_all = of_targets_all.view(of_targets_all.size(0), tot_of_num, -1, of_targets_all.size(2), of_targets_all.size(3))
+
                             of_outputs, raw_outputs, of_targets, raw_targets = cur_model(inputs, of_targets_all)
-                            raw_scores = score_func(raw_targets, raw_outputs).cpu().data.numpy()
-                            raw_scores = np.sum(np.sum(np.sum(raw_scores, axis=3), axis=2), axis=1)  # mse
-                            raw_training_scores_set[s_idx][h_idx][w_idx].append(raw_scores)
+                            raw_scores_ssim = 1 - score_func_ssim(raw_targets, raw_outputs).cpu().data.numpy()
+                            raw_training_scores_set1[s_idx][h_idx][w_idx].append(raw_scores_ssim)
+                            raw_scores_mse = score_func_mse(raw_targets, raw_outputs).cpu().data.numpy()
+                            raw_scores_mse = np.sum(np.sum(np.sum(raw_scores_mse, axis=3), axis=2), axis=1)
+                            raw_training_scores_set2[s_idx][h_idx][w_idx].append(raw_scores_mse)
                             if useFlow:
-                                of_scores = score_func(of_targets, of_outputs).cpu().data.numpy()
-                                of_scores = np.sum(np.sum(np.sum(of_scores, axis=3), axis=2), axis=1)  # mse
-                                of_training_scores_set[s_idx][h_idx][w_idx].append(of_scores)
+                                of_scores_ssim = 1 - score_func_ssim(of_targets, of_outputs).cpu().data.numpy()
+                                of_training_scores_set1[s_idx][h_idx][w_idx].append(of_scores_ssim)
+                                of_scores_mse = score_func_mse(of_targets, of_outputs).cpu().data.numpy()
+                                of_scores_mse = np.sum(np.sum(np.sum(of_scores_mse, axis=3), axis=2), axis=1)  # mse
+                                of_training_scores_set2[s_idx][h_idx][w_idx].append(of_scores_mse)
 
-                    raw_training_scores_set[s_idx][h_idx][w_idx] = np.concatenate(raw_training_scores_set[s_idx][h_idx][w_idx], axis=0)
+                    raw_training_scores_set1[s_idx][h_idx][w_idx] = np.concatenate(raw_training_scores_set1[s_idx][h_idx][w_idx], axis=0)
+                    raw_training_scores_set2[s_idx][h_idx][w_idx] = np.concatenate(raw_training_scores_set2[s_idx][h_idx][w_idx], axis=0)
                     if useFlow:
-                        of_training_scores_set[s_idx][h_idx][w_idx] = np.concatenate(of_training_scores_set[s_idx][h_idx][w_idx], axis=0)
-                    del cur_model, raw_losses, of_losses
+                        of_training_scores_set1[s_idx][h_idx][w_idx] = np.concatenate(of_training_scores_set1[s_idx][h_idx][w_idx], axis=0)
+                        of_training_scores_set2[s_idx][h_idx][w_idx] = np.concatenate(of_training_scores_set2[s_idx][h_idx][w_idx], axis=0)
 
-        torch.save(raw_training_scores_set, os.path.join(data_root_dir, modality, dataset_name + '_' + 'raw_training_scores_{}_{}.npy'.format(foreground_extraction_mode, method)))
-        torch.save(of_training_scores_set, os.path.join(data_root_dir, modality, dataset_name + '_' + 'of_training_scores_{}_{}.npy'.format(foreground_extraction_mode, method)))
+        torch.save(raw_training_scores_set1,
+                   os.path.join(data_root_dir, modality, dataset_name + '_' + 'raw_training_scores1_{}_{}.npy'.format(foreground_extraction_mode, method)))
+        torch.save(of_training_scores_set1, os.path.join(data_root_dir, modality, dataset_name + '_' + 'of_training_scores1_{}_{}.npy'.format(foreground_extraction_mode, method)))
+        torch.save(raw_training_scores_set2,
+                   os.path.join(data_root_dir, modality, dataset_name + '_' + 'raw_training_scores2_{}_{}.npy'.format(foreground_extraction_mode, method)))
+        torch.save(of_training_scores_set2, os.path.join(data_root_dir, modality, dataset_name + '_' + 'of_training_scores2_{}_{}.npy'.format(foreground_extraction_mode, method)))
     else:
-        raw_losses = AverageMeter()
-        of_losses = AverageMeter()
         for h_idx in range(len(foreground_set)):
             for w_idx in range(len(foreground_set[h_idx])):
+                raw_losses = AverageMeter()
+                of_losses = AverageMeter()
                 cur_training_data = foreground_set[h_idx][w_idx]
+
                 if len(cur_training_data) > 1:  # num > 1 for data parallel
                     cur_training_data2 = foreground_set2[h_idx][w_idx]
                     cur_dataset = cube_to_train_dataset(cur_training_data, target=cur_training_data2)
-                    cur_dataloader = DataLoader(dataset=cur_dataset, batch_size=batch_size, shuffle=True)
+                    cur_dataloader = DataLoader(dataset=cur_dataset, batch_size=batch_size, shuffle=True, num_workers=8)
+                    cur_model = torch.nn.DataParallel(LSTM_Unet_Cnm3(features_root=cp.getint(method, 'nf'), tot_raw_num=tot_frame_num,
+                                                                     tot_of_num=tot_of_num, border_mode=border_mode, rawRange=rawRange,
+                                                                     useFlow=useFlow, padding=padding, m=1)).cuda()
 
-                    cur_model = torch.nn.DataParallel(network_architecture).cuda()
                     optimizer = optim.Adam(cur_model.parameters(), eps=1e-7, weight_decay=0.0)
+
                     cur_model.train()
                     for epoch in range(epochs):
                         for idx, (inputs, of_targets_all, _) in enumerate(cur_dataloader):
                             inputs = inputs.cuda().type(torch.cuda.FloatTensor)
                             of_targets_all = of_targets_all.cuda().type(torch.cuda.FloatTensor)
 
+                            inputs = inputs.view(inputs.size(0), tot_frame_num, -1, inputs.size(2), inputs.size(3))
+                            of_targets_all = of_targets_all.view(of_targets_all.size(0), tot_of_num, -1, of_targets_all.size(2), of_targets_all.size(3))
+
                             of_outputs, raw_outputs, of_targets, raw_targets = cur_model(inputs, of_targets_all)
+
+                            max_num = 30
+                            # visualize_pair_map(
+                            #      batch_1=img_batch_tensor2numpy(raw_targets.cpu().detach()[:max_num, 0:3, :, :]),
+                            #      batch_2=img_batch_tensor2numpy(raw_outputs.cpu().detach()[:max_num, 0:3, :, :]))
+                            # visualize_pair(
+                            #      batch_1=img_batch_tensor2numpy(of_targets.cpu().detach()[:max_num, 0:2, :, :]),
+                            #      batch_2=img_batch_tensor2numpy(of_outputs.cpu().detach()[:max_num, 0:2, :, :]))
 
                             loss_raw = loss_func(raw_targets.detach(), raw_outputs)
                             if useFlow:
@@ -402,39 +460,49 @@ if method == 'SelfComplete':
                             optimizer.step()
 
                             if idx % 5 == 0:
-                                print('Block: ({}, {}), epoch {}, batch {} of {}, raw loss: {}, of loss: {}'.format(h_idx, w_idx, epoch, idx,
-                                                                                                                    cur_dataset.__len__() // batch_size,
-                                                                                                                    raw_losses.avg,
-                                                                                                                    of_losses.avg))
+                                print('Block: ({}, {}), epoch {}, batch {} of {}, raw loss: {}, of loss: {}'.format(
+                                    h_idx, w_idx, epoch, idx, cur_dataset.__len__() // batch_size, raw_losses.avg, of_losses.avg))
 
-                    model_set[h_idx][w_idx].append(cur_model.state_dict())
-
-                    # A forward pass to store the training scores of optical flow and raw datasets respectively.
-                    forward_dataloader = DataLoader(dataset=cur_dataset, batch_size=batch_size, shuffle=False)
-                    score_func = nn.MSELoss(reduce=False)
+                    model_set[h_idx][w_idx].append(cur_model.module.state_dict())
+                    # torch.cuda.empty_cache()
+                    #  /*--  A forward pass to store the training scores of optical flow and raw datasets respectively*/
+                    forward_dataloader = DataLoader(dataset=cur_dataset, batch_size=batch_size // 4, shuffle=False, num_workers=8)
                     cur_model.eval()
                     for idx, (inputs, of_targets_all, _) in enumerate(forward_dataloader):
                         inputs = inputs.cuda().type(torch.cuda.FloatTensor)
                         of_targets_all = of_targets_all.cuda().type(torch.cuda.FloatTensor)
+
+                        inputs = inputs.view(inputs.size(0), tot_frame_num, -1, inputs.size(2), inputs.size(3))
+                        of_targets_all = of_targets_all.view(of_targets_all.size(0), tot_of_num, -1, of_targets_all.size(2), of_targets_all.size(3))
+
                         of_outputs, raw_outputs, of_targets, raw_targets = cur_model(inputs, of_targets_all)
 
-                        raw_scores = score_func(raw_targets, raw_outputs).cpu().data.numpy()
-                        raw_scores = np.sum(np.sum(np.sum(raw_scores, axis=3), axis=2), axis=1)  # mse
-                        raw_training_scores_set[h_idx][w_idx].append(raw_scores)
+                        raw_scores_ssim = 1 - score_func_ssim(raw_targets, raw_outputs).cpu().data.numpy()
+                        raw_training_scores_set1[h_idx][w_idx].append(raw_scores_ssim)
+                        raw_scores_mse = score_func_mse(raw_targets, raw_outputs).cpu().data.numpy()
+                        raw_scores_mse = np.sum(np.sum(np.sum(raw_scores_mse, axis=3), axis=2), axis=1)  # mse
+                        raw_training_scores_set2[h_idx][w_idx].append(raw_scores_mse)
                         if useFlow:
-                            of_scores = score_func(of_targets, of_outputs).cpu().data.numpy()
-                            of_scores = np.sum(np.sum(np.sum(of_scores, axis=3), axis=2), axis=1)  # mse
-                            of_training_scores_set[h_idx][w_idx].append(of_scores)
+                            of_scores_ssim = 1 - score_func_ssim(of_targets, of_outputs).cpu().data.numpy()
+                            of_training_scores_set1[h_idx][w_idx].append(of_scores_ssim)
+                            of_scores_mse = score_func_mse(of_targets, of_outputs).cpu().data.numpy()
+                            of_scores_mse = np.sum(np.sum(np.sum(of_scores_mse, axis=3), axis=2), axis=1)  # mse
+                            of_training_scores_set2[h_idx][w_idx].append(of_scores_mse)
 
-                    raw_training_scores_set[h_idx][w_idx] = np.concatenate(raw_training_scores_set[h_idx][w_idx], axis=0)
+                    raw_training_scores_set1[h_idx][w_idx] = np.concatenate(raw_training_scores_set1[h_idx][w_idx], axis=0)
+                    raw_training_scores_set2[h_idx][w_idx] = np.concatenate(raw_training_scores_set2[h_idx][w_idx], axis=0)
                     if useFlow:
-                        of_training_scores_set[h_idx][w_idx] = np.concatenate(of_training_scores_set[h_idx][w_idx], axis=0)
-        torch.save(raw_training_scores_set, os.path.join(data_root_dir, modality, dataset_name + '_' + 'raw_training_scores_{}_{}.npy'.format(foreground_extraction_mode, method)))
-        torch.save(of_training_scores_set, os.path.join(data_root_dir, modality, dataset_name + '_' + 'of_training_scores_{}_{}.npy'.format(foreground_extraction_mode, method)))
-        print('training scores saved!')
+                        of_training_scores_set1[h_idx][w_idx] = np.concatenate(of_training_scores_set1[h_idx][w_idx], axis=0)
+                        of_training_scores_set2[h_idx][w_idx] = np.concatenate(of_training_scores_set2[h_idx][w_idx], axis=0)
+        torch.save(raw_training_scores_set1,
+                   os.path.join(data_root_dir, modality, dataset_name + '_' + 'raw_training_scores1_{}_{}.npy'.format(foreground_extraction_mode, method)))
+        torch.save(raw_training_scores_set2,
+                   os.path.join(data_root_dir, modality, dataset_name + '_' + 'raw_training_scores2_{}_{}.npy'.format(foreground_extraction_mode, method)))
+        torch.save(of_training_scores_set1, os.path.join(data_root_dir, modality, dataset_name + '_' + 'of_training_scores1_{}_{}.npy'.format(foreground_extraction_mode, method)))
+        torch.save(of_training_scores_set2, os.path.join(data_root_dir, modality, dataset_name + '_' + 'of_training_scores2_{}_{}.npy'.format(foreground_extraction_mode, method)))
+        print('training scores saved')
 
-    torch.save(model_set, os.path.join(data_root_dir, modality, dataset_name+'_'+'model_{}_{}.npy'.format(foreground_extraction_mode, method)))
+    torch.save(model_set, os.path.join(data_root_dir, modality, dataset_name + '_' + 'model_{}_{}.npy'.format(foreground_extraction_mode, method)))
     print('Training of {} for dataset: {} has completed!'.format(method, dataset_name))
 else:
     raise NotImplementedError
-
