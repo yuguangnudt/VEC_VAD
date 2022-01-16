@@ -1,4 +1,4 @@
-## Video Abnormal Event Detection by Learning to Complete Visual Cloze Tests
+## Video Anomaly Detection via Visual Cloze Tests
 
 This repository is the official extension of [Cloze Test Helps: Effective Video Anomaly Detection via Learning to Complete Video Events](https://dl.acm.org/doi/10.1145/3394171.3413973) (oral paper In ACM Multimedia 2020). Further maintenance and updates will be done.
 
