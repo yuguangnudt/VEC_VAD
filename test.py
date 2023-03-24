@@ -397,32 +397,5 @@ if criterion == 'frame':
         results_path = os.path.join(results_dir, dataset_name, '{}_{}_{}_frame_results.npz'.format(modality, foreground_extraction_mode, method))
         print('Results written to {}:'.format(results_path))
         auc = save_roc_pr_curve_data(all_frame_scores, all_targets, results_path)
-elif criterion == 'pixel':
-    if dataset_name != 'ShanghaiTech':
-        all_pixel_scores = list()
-        all_targets = list()
-        thr = 0.4
-        for idx, (_, target) in enumerate(dataset_loader):
-            print('Processing {}-th frame'.format(idx))
-            cur_pixel_results = torch.load(os.path.join(results_dir, dataset_name, 'score_mask', '{}'.format(idx)))
-            target_mask = target[0].numpy()
-            all_targets.append(target[0].numpy().max())
-            if all_targets[-1] > 0:
-                cur_effective_scores = cur_pixel_results[target_mask > 0]
-                sorted_score = np.sort(cur_effective_scores)
-                cut_off_idx = np.int(np.round((1 - thr) * cur_effective_scores.shape[0]))
-                cut_off_score = cur_effective_scores[cut_off_idx]
-            else:
-                cut_off_score = cur_pixel_results.max()
-            all_pixel_scores.append(cut_off_score)
-        all_frame_scores = np.array(all_pixel_scores)
-        all_targets = np.array(all_targets)
-        all_targets = all_targets > 0
-        results_path = os.path.join(results_dir, dataset_name,
-                                    '{}_{}_{}_pixel_results.npz'.format(modality, foreground_extraction_mode, method))
-        print('Results written to {}:'.format(results_path))
-        results = save_roc_pr_curve_data(all_frame_scores, all_targets, results_path)
-    else:
-        raise NotImplementedError
 else:
     raise NotImplementedError

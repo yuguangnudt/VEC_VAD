@@ -76,8 +76,6 @@ Edit the file `config.cfg` according to Experimental Settings in our paper or yo
 | :-----: | :------: | :----: | :----------: |
 |  AUROC  |  97.3%   | 90.2%  |    74.8%     |
 
-Extensions and higher performance will be released!
-
 ## 7. Citation
 
 ```
